@@ -26,7 +26,7 @@
 #define URL_LENGTH                             256
 #define WIFI_SERVICE                           "com.webos.service.wifi"
 #define TELEPHONY_SERVICE                      "com.webos.service.telephony"
-#define GEOLOCKEY_CONFIG_PATH                  "/etc/geolocation.conf"
+#define GEOLOCKEY_CONFIG_PATH                  "/etc/location/wsp.conf"
 #define SCAN_METHOD                            "luna://com.webos.service.wifi/scan"
 #define SCAN_PAYLOAD                           "{}"
 

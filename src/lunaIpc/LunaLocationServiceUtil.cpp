@@ -19,7 +19,7 @@
 #include "ServiceAgent.h"
 #include <LocationService.h>
 
-#define GEOLOCKEY_CONFIG_PATH       "/etc/geolocation.conf"
+#define GEOLOCKEY_CONFIG_PATH       "/etc/location/wsp.conf"
 
 LocationService *loc_svc_ptr = NULL;
 

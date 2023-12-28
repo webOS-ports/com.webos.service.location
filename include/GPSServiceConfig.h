@@ -23,7 +23,7 @@ using namespace std;
 #include <string>
 #include <gps_cfg.h>
 
-#define    GPS_CONF_FILE    "/etc/gps.conf"
+#define    GPS_CONF_FILE    "/etc/location/gpsConfig.conf"
 
 class GPSServiceConfig {
 public:
