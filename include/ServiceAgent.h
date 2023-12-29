@@ -118,7 +118,7 @@ enum RequestState {
 };
 
 // Mapped with HandlerTypes
-enum HanlderRequestType {
+enum HandlerType {
     HANDLER_HYBRID_BIT = (1u << HANDLER_HYBRID),
     HANDLER_GPS_BIT = (1u << HANDLER_GPS),
     HANDLER_NETWORK_BIT = (1u << HANDLER_NETWORK)
