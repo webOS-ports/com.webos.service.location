@@ -46,9 +46,13 @@ LSMethod LocationService::rootMethod[] = {
         {"getState",                  LocationService::_getState},
         {"getLocationHandlerDetails", LocationService::_getLocationHandlerDetails},
         {"getGpsSatelliteData",       LocationService::_getGpsSatelliteData},
-//        {"getTimeToFirstFix",         LocationService::_getTimeToFirstFix},
+        {"getTimeToFirstFix",         LocationService::_getTimeToFirstFix},
         {"getLocationUpdates",        LocationService::_getLocationUpdates},
-//        {"getCachedPosition",         LocationService::_getCachedPosition},
+        {"getCachedPosition",         LocationService::_getCachedPosition},
+        {"sendExtraCommand",          LocationService::_sendExtraCommand},
+        {"stopGPS",                   LocationService::_stopGPS},
+        {"exitLocation",              LocationService::_exitLocation},
+        {"setGPSParameters",          LocationService::_setGPSParameters},
         {0,                           0}
 };
 
@@ -243,14 +247,14 @@ bool LocationService::locationServiceRegister(const char *srvcname, GMainLoop *m
 
     bRetVal = LSCategorySetData(*msvcHandle, "/", this, &mLSError);
     LSERROR_CHECK_AND_PRINT(bRetVal, mLSError);
-/*
+
     // add geofence category
     bRetVal = LSRegisterCategoryAppend(*msvcHandle, "/geofence", geofenceMethod, NULL, &mLSError);
     LSERROR_CHECK_AND_PRINT(bRetVal, mLSError);
 
     bRetVal = LSCategorySetData(*msvcHandle, "/geofence", this, &mLSError);
     LSERROR_CHECK_AND_PRINT(bRetVal, mLSError);
-*/
+
     // add mock categoty
     bRetVal = LSRegisterCategoryAppend(*msvcHandle, "/mock", mockPublicMethod, NULL, &mLSError);
     LSERROR_CHECK_AND_PRINT(bRetVal, mLSError);

@@ -6,7 +6,13 @@
     "com.webos.service.location/mock/setLocation"
   ],
   "location.query": [
+    "com.webos.service.location/sendExtraCommand",
+    "com.webos.service.location/setGPSParameters",
+    "com.webos.service.location/stopGPS",
+    "com.webos.service.location/geofence/addGeofenceArea",
+    "com.webos.service.location/geofence/removeGeofenceArea",
     "com.webos.service.location/getAllLocationHandlers",
+    "com.webos.service.location/getCachedPosition",
     "com.webos.service.location/getGeoCodeLocation",
     "com.webos.service.location/getGpsSatelliteData",
     "com.webos.service.location/getGpsStatus",
@@ -14,6 +20,7 @@
     "com.webos.service.location/getLocationUpdates",
     "com.webos.service.location/getNmeaData",
     "com.webos.service.location/getReverseLocation",
+    "com.webos.service.location/getTimeToFirstFix",
     "com.webos.service.location/getState"
   ]
 }
