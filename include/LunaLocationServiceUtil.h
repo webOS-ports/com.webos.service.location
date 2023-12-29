@@ -147,7 +147,7 @@
  * JSON SCHEMA: getLocationHandlerDetails (string Handler)
  */
 #define JSCHEMA_GET_LOCATION_HANDLER_DETAILS                STRICT_SCHEMA(\
-        PROPS_1(ENUM_PROP(Handler, string, "gps", "network")) \
+        PROPS_1(ENUM_PROP(Handler, string, "gps", "network", "passive", "hybrid")) \
         REQUIRED_1(Handler))
 
 /*
@@ -168,7 +168,7 @@
  * JSON SCHEMA: getState (string Handler, [bool subscribe])
  */
 #define JSCHEMA_GET_STATE                                   STRICT_SCHEMA(\
-        PROPS_2(ENUM_PROP(Handler, string, "gps", "network"), PROP(subscribe, boolean)) \
+        PROPS_2(ENUM_PROP(Handler, string, "gps", "network", "passive", "hybrid"), PROP(subscribe, boolean)) \
         REQUIRED_1(Handler))
 
 /*
@@ -195,7 +195,7 @@
  * JSON SCHEMA: setState (string Handler, bool state)
  */
 #define JSCHEMA_SET_STATE                                   STRICT_SCHEMA(\
-        PROPS_2(ENUM_PROP(Handler, string, "gps", "network"), PROP(state, boolean)) \
+        PROPS_2(ENUM_PROP(Handler, string, "gps", "network", "passive", "hybrid"), PROP(state, boolean)) \
         REQUIRED_2(Handler, state))
 
 /*
@@ -250,7 +250,7 @@
             PROP_WITH_OPT(minimumInterval, integer, "minimum":0, "maximum":3600000), \
             PROP_WITH_OPT(minimumDistance, integer, "minimum":0, "maximum":60000), \
             PROP_WITH_OPT(responseTimeout, integer, "minimum":0, "maximum":720), \
-            ENUM_PROP(Handler, string, "gps", "network", "passive")\
+            ENUM_PROP(Handler, string, "gps", "network", "passive", "hybrid")\
         ))
 
 
@@ -262,7 +262,7 @@
 #define JSCHEMA_GET_CACHED_POSITION                         STRICT_SCHEMA(\
         PROPS_2(\
             PROP_WITH_OPT(maximumAge, integer, "minimum":0, "exclusiveMinimum": true), \
-            ENUM_PROP(Handler, string, "gps", "network", "passive")))
+            ENUM_PROP(Handler, string, "gps", "network", "passive", "hybrid")))
 
 
 bool LSMessageInitErrorReply();
