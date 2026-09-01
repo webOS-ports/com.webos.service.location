@@ -72,6 +72,7 @@ public:
     static void gpsRequestUtcTimeCb(void *user_data);
     static void gpsXtraDownloadRequestCb(void *user_data);
     static void nfwNotifyCb(nyx_gps_nfw_notification_t *notification, void *user_data);
+    void injectSystemTime();
     static void xtraTimeCb(int64_t utcTime, int64_t timeReference, int uncertainty);
     static void xtraDataCb(char *data, int length);
     static void xtraDataDownloadThread(void *arg);

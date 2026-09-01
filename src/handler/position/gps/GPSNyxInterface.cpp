@@ -15,6 +15,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
+#include <sys/time.h>
+#include <time.h>
 #include <GPSPositionProvider.h>
 #include <MockLocation.h>
 
@@ -134,6 +136,18 @@ void GPSNyxInterface::deInitialize() {
 }
 
 nyx_error_t GPSNyxInterface::startGPS() {
+    /*
+     * Give the engine a time estimate before starting it.
+     *
+     * This cannot wait for gpsRequestUtcTimeCb: that is only called by a HAL
+     * advertising ON_DEMAND_TIME, and neither device tested here does - sargo
+     * reports capabilities 99 and mindphone 1991, and bit 0x10 is clear in
+     * both. So nothing ever asked, nothing was ever injected, and getGpsDebugData
+     * showed both engines still holding their 2017 build-default time estimate
+     * while doing a full cold search on every fix attempt.
+     */
+    injectSystemTime();
+
     return nyx_gps_start(mNyxGpsSystem);
 }
 
@@ -474,11 +488,69 @@ void GPSNyxInterface::gpsReleaseWakelockCb(void *user_data) {
     printf_debug("enter gpsReleaseWakelockCb\n");
 }
 
+/*
+ * Time older than this is taken to mean the clock has never been set, and is
+ * not worth injecting - a wrong time is worse for the engine than none.
+ * 2020-01-01 00:00:00 UTC.
+ */
+#define GPS_PLAUSIBLE_TIME_MS 1577836800000LL
+
+/*
+ * How far off the system clock might be. NTP-synced it is milliseconds; freshly
+ * restored from the RTC it can be seconds. Claim a second so the engine treats
+ * it as coarse aiding rather than as a precise reference.
+ */
+#define GPS_SYSTEM_TIME_UNCERTAINTY_MS 1000
+
+void GPSNyxInterface::injectSystemTime() {
+    struct timeval tv;
+    struct timespec ts;
+    int64_t utcTime;
+    int64_t timeReference = 0;
+
+    if (0 != gettimeofday(&tv, nullptr))
+        return;
+
+    utcTime = (int64_t) tv.tv_sec * 1000LL + tv.tv_usec / 1000;
+
+    if (utcTime < GPS_PLAUSIBLE_TIME_MS) {
+        printf_warning("system clock not set, not injecting time\n");
+        return;
+    }
+
+    /*
+     * timeReference is the monotonic timestamp at which utcTime was read, so
+     * the engine can age the estimate. CLOCK_BOOTTIME matches what Android
+     * passes here because it keeps counting across suspend.
+     */
+    if (0 == clock_gettime(CLOCK_BOOTTIME, &ts))
+        timeReference = (int64_t) ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+
+    if (NYX_ERROR_NONE != injectExtraTime(utcTime, timeReference,
+                                          GPS_SYSTEM_TIME_UNCERTAINTY_MS))
+        printf_warning("failed to inject system time\n");
+    else
+        printf_info("injected system time %lld as coarse aiding\n",
+                    (long long) utcTime);
+}
+
 void GPSNyxInterface::gpsRequestUtcTimeCb(void *user_data) {
     GPSNyxInterface *gpsNyxInterface = (GPSNyxInterface *) user_data;
     GPSPositionProvider *providerInstance =
             (GPSPositionProvider *) gpsNyxInterface->gpsProviderInstance;
     printf_debug("enter gpsRequestUtcTimeCb\n");
+
+    /*
+     * Answer immediately from the system clock. The engine asked because it has
+     * no time of its own, and without one it cannot do anything but a full cold
+     * search - the debug data shows it sitting at its 2017 build default. The
+     * NTP paths below refine this, but neither is available everywhere: the
+     * built-in client is only set up when the XTRA client fails to initialise,
+     * and nyx_gps_download_ntp_time needs a module that implements it, which
+     * the hybris GPS module does not. Before this, that combination meant no
+     * time was ever injected at all.
+     */
+    gpsNyxInterface->injectSystemTime();
 
     if (DOWNLOADING == gpsNyxInterface->mDownloadNtpDataStatus)
         return;
