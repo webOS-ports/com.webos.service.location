@@ -22,6 +22,7 @@
 #include <GeoLocation.h>
 #include <location_errors.h>
 #include <Location.h>
+#include <nyx/common/nyx_gps_common.h>
 
 class ILocationCallbacks {
 public:
@@ -33,6 +34,13 @@ public:
     virtual void getGpsStatusCb(int state)=0;
 
     virtual void getGpsSatelliteDataCb(Satellite *)=0;
+
+    /*
+     * A non-framework entity - carrier, modem, or GNSS chip vendor - asked for
+     * the device's location. This reports what already happened and takes no
+     * response, unlike a network-initiated request.
+     */
+    virtual void nfwNotifyCb(nyx_gps_nfw_notification_t *notification)=0;
 
     virtual void geofenceAddCb(int32_t geofence_id, int32_t status,
             gpointer user_data)=0;

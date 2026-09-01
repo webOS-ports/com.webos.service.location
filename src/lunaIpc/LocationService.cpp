@@ -48,6 +48,7 @@ LSMethod LocationService::rootMethod[] = {
         {"getGpsSatelliteData",       LocationService::_getGpsSatelliteData},
         {"getTimeToFirstFix",         LocationService::_getTimeToFirstFix},
         {"getGpsDebugData",           LocationService::_getGpsDebugData},
+        {"getNfwNotifications",       LocationService::_getNfwNotifications},
         {"getLocationUpdates",        LocationService::_getLocationUpdates},
         {"getCachedPosition",         LocationService::_getCachedPosition},
         {"sendExtraCommand",          LocationService::_sendExtraCommand},
@@ -1485,6 +1486,46 @@ bool LocationService::getGpsSatelliteData(LSHandle *sh, LSMessage *message, void
         j_release(&parsedObj);
 
     if (errorCode != LOCATION_SUCCESS)
+        LSMessageReplyError(sh, message, errorCode);
+
+    return true;
+}
+
+bool LocationService::getNfwNotifications(LSHandle *sh, LSMessage *message, void *data) {
+    printMessageDetails("LUNA-API", message, sh);
+    LSError mLSError;
+    jvalue_ref parsedObj = NULL;
+    LocationErrorCode errorCode = LOCATION_SUCCESS;
+    bool mRetVal;
+
+    LSErrorInit(&mLSError);
+
+    if (!LSMessageValidateSchemaReplyOnError(sh, message, JSCHEMA_GET_NFW_NOTIFICATIONS, &parsedObj)) {
+        LS_LOG_ERROR("Schema Error in getNfwNotifications");
+        return true;
+    }
+
+    /*
+     * Purely a subscription: these arrive when the GNSS stack decides to report
+     * one, so there is nothing to return now and no handler to start. Not gated
+     * on the GPS handler being on either - the point of the notification is to
+     * tell the user their location was accessed, which is most worth knowing
+     * when they did not ask for it.
+     */
+    mRetVal = LSSubscriptionAdd(sh, SUBSC_GET_NFW_KEY, message, &mLSError);
+
+    if (mRetVal == false) {
+        LS_LOG_ERROR("Failed to add to subscription list");
+        LSErrorPrintAndFree(&mLSError);
+        errorCode = LOCATION_UNKNOWN_ERROR;
+    }
+
+    if (!jis_null(parsedObj))
+        j_release(&parsedObj);
+
+    if (LOCATION_SUCCESS == errorCode)
+        LSMessageReplySubscriptionSuccess(sh, message);
+    else
         LSMessageReplyError(sh, message, errorCode);
 
     return true;
@@ -3036,6 +3077,72 @@ void LocationService::positionDataUnref(gpointer data) {
     g_free(posData->retString1);
     g_free(posData->retString2);
     g_slice_free(PositionData, data);
+}
+
+void LocationService::nfwNotifyCb(nyx_gps_nfw_notification_t *notification) {
+    jvalue_ref serviceObject = NULL;
+    GSimpleAsyncResult *asyncRes = NULL;
+    NfwData *nfwData = NULL;
+    const char *retString = NULL;
+
+    if (nullptr == notification)
+        return;
+
+    serviceObject = jobject_create();
+
+    if (jis_null(serviceObject))
+        return;
+
+    location_util_form_json_reply(serviceObject, true, LOCATION_SUCCESS);
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("proxyAppPackageName"),
+                jstring_create(notification->proxy_app_package_name));
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("protocolStack"),
+                jnumber_create_i32(notification->protocol_stack));
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("otherProtocolStackName"),
+                jstring_create(notification->other_protocol_stack_name));
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("requestor"),
+                jnumber_create_i32(notification->requestor));
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("requestorId"),
+                jstring_create(notification->requestor_id));
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("responseType"),
+                jnumber_create_i32(notification->response_type));
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("inEmergencyMode"),
+                jboolean_create(notification->in_emergency_mode));
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("isCachedLocation"),
+                jboolean_create(notification->is_cached_location));
+
+    retString = jvalue_tostring_simple(serviceObject);
+
+    /*
+     * The notification arrives on the binder thread, so hand it to the main
+     * loop before touching the subscription list - the same hop the NMEA and
+     * status callbacks make.
+     */
+    asyncRes = g_simple_async_result_new(NULL, sendNfwNotification, this, NULL);
+    nfwData = g_slice_new0(NfwData);
+    nfwData->nfwString = g_strdup(retString);
+    nfwData->lsHandle = mServiceHandle;
+
+    g_simple_async_result_set_op_res_gpointer(asyncRes, nfwData, nfwDataUnref);
+    g_simple_async_result_complete_in_idle(asyncRes);
+    g_object_unref(asyncRes);
+
+    j_release(&serviceObject);
+}
+
+void LocationService::nfwDataUnref(gpointer data) {
+    NfwData *nfwData = (NfwData *) data;
+    g_free(nfwData->nfwString);
+    g_slice_free(NfwData, data);
+}
+
+void LocationService::sendNfwNotification(GObject *source, GAsyncResult *res, gpointer userdata) {
+    LocationService *locService = (LocationService *) userdata;
+    NfwData *nfwData = (NfwData *) g_simple_async_result_get_op_res_gpointer(G_SIMPLE_ASYNC_RESULT(res));
+
+    locService->LSSubscriptionNonSubscriptionRespond(nfwData->lsHandle,
+                                                     SUBSC_GET_NFW_KEY,
+                                                     nfwData->nfwString);
 }
 
 void LocationService::sendNmeaData(GObject *source, GAsyncResult *res, gpointer userdata) {

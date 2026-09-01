@@ -111,6 +111,11 @@ typedef struct _NmeaData {
     LSHandle *lsHandle;
 } NmeaData;
 
+typedef struct _NfwData {
+    char *nfwString;
+    LSHandle *lsHandle;
+} NfwData;
+
 typedef struct _SatelliteData {
     char *satelliteString;
     LSHandle *lsHandle;
@@ -278,8 +283,10 @@ public:
     // /**Callback called from Handlers********/
 
     static void sendNmeaData(GObject *source, GAsyncResult *res, gpointer userdata);
+    static void sendNfwNotification(GObject *source, GAsyncResult *res, gpointer userdata);
 
     static void nmeaDataUnref(gpointer data);
+    static void nfwDataUnref(gpointer data);
 
     static void sendSatelliteData(GObject *source, GAsyncResult *res, gpointer userdata);
 
@@ -477,6 +484,7 @@ public:
 public:
     void getLocationUpdateCb(GeoLocation& location, ErrorCodes errCode,HandlerTypes type);
     void getNmeaDataCb(long long timestamp, char *data, int length);
+    void nfwNotifyCb(nyx_gps_nfw_notification_t *notification);
     void getGpsStatusCb(int state);
     void getGpsSatelliteDataCb(Satellite *);
     void geofenceAddCb(int32_t geofence_id, int32_t status, gpointer user_data);
@@ -542,6 +550,7 @@ private:
     LOCATION_SERVICE_METHOD(getGpsSatelliteData);
     LOCATION_SERVICE_METHOD(getTimeToFirstFix);
     LOCATION_SERVICE_METHOD(getGpsDebugData);
+    LOCATION_SERVICE_METHOD(getNfwNotifications);
     LOCATION_SERVICE_METHOD(getLocationUpdates);
     LOCATION_SERVICE_METHOD(getCachedPosition);
     LOCATION_SERVICE_METHOD(cancelSubscription);

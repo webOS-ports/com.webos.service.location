@@ -22,6 +22,7 @@
     "com.webos.service.location/getReverseLocation",
     "com.webos.service.location/getTimeToFirstFix",
     "com.webos.service.location/getGpsDebugData",
+    "com.webos.service.location/getNfwNotifications",
     "com.webos.service.location/getState"
   ]
 }

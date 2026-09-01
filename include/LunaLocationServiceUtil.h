@@ -165,6 +165,12 @@
         REQUIRED_2(latitude, longitude))
 
 /*
+ * JSON SCHEMA: getNfwNotifications ([bool subscribe])
+ */
+#define JSCHEMA_GET_NFW_NOTIFICATIONS                       STRICT_SCHEMA(\
+        PROPS_1(PROP(subscribe, boolean)))
+
+/*
  * JSON SCHEMA: getGpsDebugData ()
  */
 #define JSCHEMA_GET_GPS_DEBUG_DATA                          SCHEMA_ANY

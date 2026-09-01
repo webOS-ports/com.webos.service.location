@@ -73,6 +73,20 @@ nyx_error_t GPSNyxInterface::initialize(void *instance) {
         printf_debug("GPSPositionProvider exit\n");
         return rc;
     }
+    /*
+     * Non-framework location notifications. Registered separately from
+     * nyx_gps_init because they are not part of the GNSS position flow: they
+     * report that something outside the platform asked where we are. Absent on
+     * any HAL without IGnssVisibilityControl, which is every 1.x one, so
+     * NYX_ERROR_NOT_IMPLEMENTED is an ordinary answer and not a failure.
+     */
+    memset(&mNfwCallbacks, 0, sizeof(nyx_gps_nfw_callbacks_t));
+    mNfwCallbacks.user_data = this;
+    mNfwCallbacks.nfw_notify_cb = nfwNotifyCb;
+
+    if (NYX_ERROR_NONE != nyx_gps_set_nfw_callback(mNyxGpsSystem, &mNfwCallbacks))
+        printf_info("non-framework location notifications unavailable\n");
+
     if (strcmp(gpsInstance->mGPSConf.mChipsetID, "Qcom") == 0) {
         mXtraClientCallbacks.user_data = this;
         mXtraClientCallbacks.xtra_client_data_cb =
@@ -404,6 +418,22 @@ void GPSNyxInterface::gpsSvStatusCb(nyx_gps_sv_status_t *sat_data, void *user_da
 
         satellite_free(sat);
     }
+}
+
+void GPSNyxInterface::nfwNotifyCb(nyx_gps_nfw_notification_t *notification,
+                                  void *user_data) {
+    GPSNyxInterface *self = (GPSNyxInterface *) user_data;
+
+    if (nullptr == notification || nullptr == self)
+        return;
+
+    GPSPositionProvider *providerInstance =
+            (GPSPositionProvider *) self->gpsProviderInstance;
+
+    if (nullptr == providerInstance || nullptr == providerInstance->getCallback())
+        return;
+
+    providerInstance->getCallback()->nfwNotifyCb(notification);
 }
 
 void GPSNyxInterface::gpsNmeaCb(int64_t timestamp, const char *nmea, int length, void *user_data) {

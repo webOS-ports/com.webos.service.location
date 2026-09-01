@@ -71,6 +71,7 @@ public:
     static void gpsNmeaCb(int64_t timestamp, const char* nmea, int length, void *user_data);
     static void gpsRequestUtcTimeCb(void *user_data);
     static void gpsXtraDownloadRequestCb(void *user_data);
+    static void nfwNotifyCb(nyx_gps_nfw_notification_t *notification, void *user_data);
     static void xtraTimeCb(int64_t utcTime, int64_t timeReference, int uncertainty);
     static void xtraDataCb(char *data, int length);
     static void xtraDataDownloadThread(void *arg);
@@ -92,6 +93,7 @@ private:
     DownloadStateEType mDownloadNtpDataStatus ;
 public:
     virtual void onRequestCompleted(NtpErrors error, const NTPData *data);
+    nyx_gps_nfw_callbacks_t mNfwCallbacks;
     nyx_device_handle_t mNyxGpsSystem;
     nyx_gps_callbacks_t mGPSCallbacks;
     nyx_gps_location_t mPosition;
