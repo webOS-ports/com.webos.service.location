@@ -772,6 +772,11 @@ ErrorCodes GPSPositionProvider::getLastPosition(Position *position,
     return ERROR_NONE;
 }
 
+nyx_error_t GPSPositionProvider::getDebugData(char *dest, size_t destLen)
+{
+    return mGPSNyxInterface.getDebugData(dest, destLen);
+}
+
 long long GPSPositionProvider::getTimeToFirstFixValue ()
 {
  LS_LOG_DEBUG("getTimeToFirstFix");

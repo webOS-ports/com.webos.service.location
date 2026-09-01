@@ -541,6 +541,7 @@ private:
     LOCATION_SERVICE_METHOD(getLocationHandlerDetails);
     LOCATION_SERVICE_METHOD(getGpsSatelliteData);
     LOCATION_SERVICE_METHOD(getTimeToFirstFix);
+    LOCATION_SERVICE_METHOD(getGpsDebugData);
     LOCATION_SERVICE_METHOD(getLocationUpdates);
     LOCATION_SERVICE_METHOD(getCachedPosition);
     LOCATION_SERVICE_METHOD(cancelSubscription);

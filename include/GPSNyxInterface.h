@@ -48,6 +48,12 @@ public:
     nyx_error_t injectExtraCommand(char* command);
     nyx_error_t updateNetworkAvailablity(NetworkInfo *networkInfo);
     nyx_error_t deleteAidingData();
+    /*
+     * Diagnostics straight from the GNSS engine. dest must be at least
+     * NYX_GPS_DEBUG_DATA_MAXLEN bytes; the module answers
+     * NYX_ERROR_NOT_IMPLEMENTED where the HAL exposes no IGnssDebug.
+     */
+    nyx_error_t getDebugData(char *dest, size_t destLen);
 
 
     //geofence

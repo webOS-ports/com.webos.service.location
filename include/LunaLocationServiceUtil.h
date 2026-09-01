@@ -165,6 +165,11 @@
         REQUIRED_2(latitude, longitude))
 
 /*
+ * JSON SCHEMA: getGpsDebugData ()
+ */
+#define JSCHEMA_GET_GPS_DEBUG_DATA                          SCHEMA_ANY
+
+/*
  * JSON SCHEMA: getState (string Handler, [bool subscribe])
  */
 #define JSCHEMA_GET_STATE                                   STRICT_SCHEMA(\

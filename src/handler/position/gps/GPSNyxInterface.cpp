@@ -181,6 +181,13 @@ nyx_error_t GPSNyxInterface::updateNetworkAvailablity(
                                                networkInfo->available, networkInfo->apn.c_str());
 }
 
+nyx_error_t GPSNyxInterface::getDebugData(char *dest, size_t destLen) {
+    if (nullptr == mNyxGpsSystem || nullptr == dest || 0 == destLen)
+        return NYX_ERROR_INVALID_VALUE;
+
+    return nyx_gps_get_debug_data(mNyxGpsSystem, dest, destLen);
+}
+
 nyx_error_t GPSNyxInterface::deleteAidingData() {
     return nyx_gps_delete_aiding_data(mNyxGpsSystem, NYX_GPS_DELETE_ALL);
 }

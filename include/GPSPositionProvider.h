@@ -248,6 +248,7 @@ public:
     GPSStatus getGPSStatus();
 
     long long getTimeToFirstFixValue ();
+    nyx_error_t getDebugData(char *dest, size_t destLen);
 private:
     GPSPositionProvider();
 

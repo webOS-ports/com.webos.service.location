@@ -47,6 +47,7 @@ LSMethod LocationService::rootMethod[] = {
         {"getLocationHandlerDetails", LocationService::_getLocationHandlerDetails},
         {"getGpsSatelliteData",       LocationService::_getGpsSatelliteData},
         {"getTimeToFirstFix",         LocationService::_getTimeToFirstFix},
+        {"getGpsDebugData",           LocationService::_getGpsDebugData},
         {"getLocationUpdates",        LocationService::_getLocationUpdates},
         {"getCachedPosition",         LocationService::_getCachedPosition},
         {"sendExtraCommand",          LocationService::_sendExtraCommand},
@@ -1485,6 +1486,63 @@ bool LocationService::getGpsSatelliteData(LSHandle *sh, LSMessage *message, void
 
     if (errorCode != LOCATION_SUCCESS)
         LSMessageReplyError(sh, message, errorCode);
+
+    return true;
+}
+
+bool LocationService::getGpsDebugData(LSHandle *sh, LSMessage *message, void *data) {
+    printMessageDetails("LUNA-API", message, sh);
+    bool bRetVal;
+    LSError mLSError;
+    jvalue_ref parsedObj = NULL;
+    jvalue_ref serviceObject = NULL;
+    char debugData[NYX_GPS_DEBUG_DATA_MAXLEN] = {0};
+    nyx_error_t rc;
+
+    LSErrorInit(&mLSError);
+
+    if (!LSMessageValidateSchemaReplyOnError(sh, message, JSCHEMA_GET_GPS_DEBUG_DATA, &parsedObj)) {
+        LS_LOG_ERROR("Schema Error in getGpsDebugData");
+        return true;
+    }
+
+    serviceObject = jobject_create();
+
+    if (jis_null(serviceObject)) {
+        j_release(&parsedObj);
+        LSMessageReplyError(sh, message, LOCATION_OUT_OF_MEM);
+        return true;
+    }
+
+    rc = mGPSProvider->getDebugData(debugData, sizeof(debugData));
+
+    if (NYX_ERROR_NONE != rc) {
+        /*
+         * Not every GNSS HAL exposes IGnssDebug - it is an optional extension -
+         * so report that as "unsupported by this device" rather than as a
+         * failure of the call.
+         */
+        j_release(&parsedObj);
+        j_release(&serviceObject);
+        LSMessageReplyError(sh, message,
+                            (NYX_ERROR_NOT_IMPLEMENTED == rc)
+                                ? LOCATION_GPS_NYX_SOURCE_UNAVAILABLE
+                                : LOCATION_UNKNOWN_ERROR);
+        return true;
+    }
+
+    location_util_form_json_reply(serviceObject, true, LOCATION_SUCCESS);
+    jobject_put(serviceObject, J_CSTR_TO_JVAL("debugData"),
+                jstring_create(debugData));
+
+    bRetVal = LSMessageReply(sh, message, jvalue_tostring_simple(serviceObject), &mLSError);
+
+    if (bRetVal == false) {
+        LSErrorPrintAndFree(&mLSError);
+    }
+
+    j_release(&parsedObj);
+    j_release(&serviceObject);
 
     return true;
 }
