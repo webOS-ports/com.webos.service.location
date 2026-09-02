@@ -947,6 +947,22 @@ ErrorCodes GPSPositionProvider::processRequest(PositionRequest request) {
                 mPosTimer = 0;
             }
             mAPIProgressFlag &= ~LOCATION_UPDATES_ON;
+
+            /*
+             * Re-arm the time-to-first-fix measurement for the next session.
+             *
+             * mTTFFState latches on the first fix and was never cleared, so
+             * both timestamps froze for the lifetime of the process and every
+             * later getTimeToFirstFix returned the same stale number. Measured
+             * on device: a first fix took 245s and reported 244492ms, correctly;
+             * a second session two minutes later took 2010ms and still reported
+             * 244492ms. TTFF is per session, so it has to reset when the
+             * session ends.
+             */
+            mTTFFState = false;
+            mFixRequestTime = 0;
+            mLastFixTime = 0;
+            mTTFF = 0;
             if (!mAPIProgressFlag) {
                 if (mEngineStarted) {
                     if (false == processCommand(COMMAND_GPS_DISABLE)) {
