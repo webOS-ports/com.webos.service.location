@@ -163,7 +163,7 @@ private:
 
     void telephonyServiceStatusUpdate(bool connected);
 
-    bool unregisterServiceStatus(void *cookie);
+    bool unregisterServiceStatus(void **cookie);
 
     bool lunaServiceCall(const char *method, const char *payload, LSFilterFunc cb, LSMessageToken *token,
                          bool oneReply);

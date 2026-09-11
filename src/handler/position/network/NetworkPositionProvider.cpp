@@ -279,8 +279,8 @@ ErrorCodes  NetworkPositionProvider::processRequest(PositionRequest request) {
             mProcessRequestInProgress = false;
             mNetworkData.unregisterForWifiAccessPoints();
             mNetworkData.unregisterForCellInfo();
-            unregisterServiceStatus(mWifiCookie);
-            unregisterServiceStatus(mTelephonyCookie);
+            unregisterServiceStatus(&mWifiCookie);
+            unregisterServiceStatus(&mTelephonyCookie);
 
             if (mTimeoutId) {
                 LS_LOG_INFO("stopping scan timer");
@@ -366,7 +366,33 @@ char *NetworkPositionProvider::createWifiQuery() {
 
 bool NetworkPositionProvider::networkPostQuery(char *postData, const char *APIKey, gboolean sync) {
     char url[URL_LENGTH] = {0};
-    sprintf(url, NETWORK_URL, APIKey);
+    int written;
+
+    /*
+     * The key is read from /etc/location/wsp.conf and may be absent (NULL) or
+     * arbitrarily long; sprintf'ing it into a 256-byte buffer trusted both.
+     */
+    if (APIKey == NULL) {
+        LS_LOG_ERROR("networkPostQuery: no geolocation API key configured");
+        return false;
+    }
+
+    /*
+     * NETWORK_URL passes through network_location_provider_url() so the mock
+     * provider can swap in its localhost endpoint at runtime; the format
+     * cannot be a literal here, hence the targeted suppression.  Both
+     * candidate strings contain exactly one %s.
+     */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+    written = snprintf(url, sizeof(url), NETWORK_URL, APIKey);
+#pragma GCC diagnostic pop
+
+    if (written < 0 || (size_t) written >= sizeof(url)) {
+        LS_LOG_ERROR("networkPostQuery: geolocation URL exceeds %d bytes", URL_LENGTH);
+        return false;
+    }
+
     LS_LOG_DEBUG("networkPostQuery %s", url);
 
     int errorCode = NetworkRequestManager::getInstance()->initiateTransaction(NULL, 0, url, sync, NULL, this,
@@ -528,24 +554,30 @@ bool NetworkPositionProvider::registerServiceStatus(const char *service, void **
     return result;
 }
 
-bool NetworkPositionProvider::unregisterServiceStatus(void *cookie) {
+bool NetworkPositionProvider::unregisterServiceStatus(void **cookie) {
     LSError lserror;
     LSErrorInit(&lserror);
 
-    if ((!cookie)||(!mLSHandle)) {
-        LS_LOG_ERROR("unregisterServiceStatus: invalid cookie/handle received %p %p", cookie, mLSHandle);
+    if ((!cookie) || (!*cookie) || (!mLSHandle)) {
+        LS_LOG_ERROR("unregisterServiceStatus: invalid cookie/handle received");
         return false;
     }
-    bool result = LSCancelServerStatus(mLSHandle, cookie, &lserror);
+    bool result = LSCancelServerStatus(mLSHandle, *cookie, &lserror);
 
     if (!result) {
         LSErrorPrint(&lserror, stderr);
         LSErrorFree(&lserror);
     }
     else
-        LS_LOG_INFO("Unregistered successfully for cookie %p", cookie);
+        LS_LOG_INFO("Unregistered successfully for cookie %p", *cookie);
 
-    cookie = NULL;
+    /*
+     * The old signature took the cookie by value, so the trailing
+     * "cookie = NULL" changed a local copy and the member kept pointing at a
+     * cancelled registration - primed for a double-cancel on the next
+     * disable/enable cycle.
+     */
+    *cookie = NULL;
 
     return result;
 }
