@@ -256,7 +256,7 @@ bool GpsWanInterface::getContextCb(LSHandle *sh, LSMessage *message, void * cont
     if (jobject_get_exists(parsed_obj, J_CSTR_TO_BUF("contexts"), &getContext_obj))
     {
         context_count =  jarray_size(getContext_obj);
-        printf_debug("enter GpsWanInterface::getContextCb context_count %d\n",context_count);
+        printf_debug("enter GpsWanInterface::getContextCb context_count %ld\n",context_count);
 
         for (counter = 0; counter < context_count; counter++)
         {

@@ -15,6 +15,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
+#include <inttypes.h>
 #include <stdio.h>
 #include "LocationService.h"
 #include "MockLocation.h"
@@ -148,25 +149,25 @@ LocationService *LocationService::getInstance() {
 LocationService::LocationService() :
         mGpsStatus(false),
         mNwStatus(false),
-        suspended_state(false),
-        htPseudoGeofence(nullptr),
-        mServiceHandle(nullptr),
-        m_lifeCycleMonitor(nullptr),
-        m_enableSuspendBlocker(false),
-        nwGeolocationKey(nullptr),
-        lbsGeocodeKey(nullptr),
-        location_request_logger(nullptr),
         mCachedGpsEngineStatus(false),
         wifistate(false),
         isInternetConnectionAvailable(false),
         isTelephonyAvailable(false),
+        suspended_state(false),
         isWifiInternetAvailable(false),
+        htPseudoGeofence(nullptr),
+        mServiceHandle(nullptr),
         mMainLoop(nullptr),
         mNetReqMgr(nullptr),
         mLBSProvider(nullptr),
         mNetworkProvider(nullptr),
         mGPSProvider(nullptr),
-        connectionStateObserverObj(nullptr) {
+        connectionStateObserverObj(nullptr),
+        m_lifeCycleMonitor(nullptr),
+        m_enableSuspendBlocker(false),
+        nwGeolocationKey(nullptr),
+        lbsGeocodeKey(nullptr),
+        location_request_logger(nullptr) {
     LS_LOG_DEBUG("LocationService object created");
 }
 
@@ -481,7 +482,7 @@ void LocationService::getReverseGeocodeData(jvalue_ref *parsedObj, GString **pos
     if (jobject_get_exists(*parsedObj, J_CSTR_TO_BUF("result_type"), &jsonSubObject)) {
         long int size = jarray_size(jsonSubObject);
         g_string_append(*posData, "&result_type=");
-        LS_LOG_DEBUG("result_type size [%d]", size);
+        LS_LOG_DEBUG("result_type size [%ld]", size);
         for (int i = 0; i < size; i++) {
             arrObject = jarray_get(jsonSubObject, i);
             nameBuf = jstring_get(arrObject);
@@ -497,7 +498,7 @@ void LocationService::getReverseGeocodeData(jvalue_ref *parsedObj, GString **pos
     if (jobject_get_exists(*parsedObj, J_CSTR_TO_BUF("location_type"), &jsonSubObject)) {
         long int size = jarray_size(jsonSubObject);
         g_string_append(*posData, "&location_type=");
-        LS_LOG_DEBUG("location_type size [%d]", size);
+        LS_LOG_DEBUG("location_type size [%ld]", size);
 
         for (long int i = 0; i < size; i++) {
             arrObject = jarray_get(jsonSubObject, i);
@@ -1208,7 +1209,6 @@ bool LocationService::setGPSParameters(LSHandle *sh, LSMessage *message, void *d
     printMessageDetails("LUNA-API", message, sh);
     jvalue_ref parsedObj = NULL;
     jvalue_ref serviceObject = NULL;
-    char *cmdStr = NULL;
     bool bRetVal;
     int ret;
 
@@ -1225,7 +1225,7 @@ bool LocationService::setGPSParameters(LSHandle *sh, LSMessage *message, void *d
 
     ret = mGPSProvider->processRequest(request);
     if (ERROR_NONE != ret) {
-        LS_LOG_ERROR("Error in %s", cmdStr);
+        LS_LOG_ERROR("Error in setGPSParameters");
         LSMessageReplyError(sh, message, LOCATION_INVALID_INPUT);
         j_release(&parsedObj);
         return true;
@@ -1256,10 +1256,6 @@ bool LocationService::exitLocation(LSHandle *sh, LSMessage *message, void *data)
     printMessageDetails("LUNA-API", message, sh);
     finalize_mock_location();
     stopGpsEngine();
-    g_main_loop_unref(mMainLoop);
-    mMainLoop = NULL;
-    LSError error;
-    bool retVal;
 
     pbnjson::JValue reply = pbnjson::Object();
     if (reply.isNull())
@@ -1270,9 +1266,21 @@ bool LocationService::exitLocation(LSHandle *sh, LSMessage *message, void *data)
     LSError lserror;
     LSErrorInit(&lserror);
 
-    if((retVal=LSMessageReply(sh, message, reply.stringify().c_str(), &lserror))==false){
-	    LSErrorPrintAndFree(&error);
+    if (!LSMessageReply(sh, message, reply.stringify().c_str(), &lserror)) {
+        /* This used to free a second, never-initialised LSError - undefined
+         * behaviour on the very path that was reporting a failure. */
+        LSErrorPrintAndFree(&lserror);
     }
+
+    /*
+     * Quit the main loop and let main() unref it and run deinit().  Unrefing
+     * the loop here while g_main_loop_run was still inside it destroyed the
+     * loop out from under the process and left it running forever, and the
+     * unref in main() then operated on freed memory.
+     */
+    if (mMainLoop != NULL)
+        g_main_loop_quit(mMainLoop);
+
     return true;
 }
 
@@ -2683,8 +2691,18 @@ void LocationService::getGpsSatelliteDataCb(Satellite *sat) {
     while (num_satellite_used_count < sat->visible_satellites_count) {
         visibleSatelliteItem = jobject_create();
 
-        if (!jis_null(visibleSatelliteItem)) {
-            LS_LOG_DEBUG(" Service Agent value of %llf num_satellite_used_count%d ",
+        /*
+         * The counter only advanced on successful allocation, so one failed
+         * jobject_create spun this loop forever inside the GNSS callback.
+         */
+        if (jis_null(visibleSatelliteItem)) {
+            j_release(&serviceArray);
+            retString = LSMessageGetErrorReply(LOCATION_OUT_OF_MEM);
+            goto EXIT;
+        }
+
+        {
+            LS_LOG_DEBUG(" Service Agent value of %f num_satellite_used_count %u ",
                          sat->sat_used[num_satellite_used_count].azimuth, num_satellite_used_count);
             jobject_put(visibleSatelliteItem, J_CSTR_TO_JVAL("index"), jnumber_create_i32(num_satellite_used_count));
             jobject_put(visibleSatelliteItem, J_CSTR_TO_JVAL("azimuth"),
@@ -2705,7 +2723,6 @@ void LocationService::getGpsSatelliteDataCb(Satellite *sat) {
             jarray_append(serviceArray, visibleSatelliteItem);
             num_satellite_used_count++;
         }
-
     }
 
     jobject_put(serviceObject, J_CSTR_TO_JVAL("satellites"), serviceArray);
@@ -2803,7 +2820,7 @@ void LocationService::geofence_breach_reply(int32_t geofenceId, int32_t status, 
     GSimpleAsyncResult *asyncResGeofence = NULL;
     GeofenceAddData *geofenceAddData = NULL;
 
-    LS_LOG_INFO("geofence_breach_reply: id=%d, status=%d, timestamp=%lld, latitude=%f, longitude=%f\n",
+    LS_LOG_INFO("geofence_breach_reply: id=%d, status=%d, timestamp=%" PRId64 ", latitude=%f, longitude=%f\n",
                 geofenceId, status, timestamp, latitude, longitude);
 
     serviceObject = jobject_create();
@@ -3348,7 +3365,7 @@ void LocationService::getLocationUpdate_reply(Position *pos, Accuracy *accuracy,
     PositionData *posData = NULL;
 
     if (pos)
-        LS_LOG_INFO("latitude %f longitude %f altitude %f timestamp %lld", pos->latitude,
+        LS_LOG_INFO("latitude %f longitude %f altitude %f timestamp %" PRId64, pos->latitude,
                     pos->longitude,
                     pos->altitude,
                     pos->timestamp);
@@ -3407,8 +3424,12 @@ void LocationService::getLocationUpdate_reply(Position *pos, Accuracy *accuracy,
 
         asyncRes = g_simple_async_result_new(NULL, sendPositionData, this, NULL);
         posData = g_slice_new0(PositionData);
-        posData->pos = *pos;
-        posData->acc = *accuracy;
+
+        if (pos)
+            posData->pos = *pos;
+
+        if (accuracy)
+            posData->acc = *accuracy;
         posData->key1 = g_strdup(key1);
         posData->key2 = g_strdup(key2);
         posData->retString1 = g_strdup(retString);
@@ -3963,7 +3984,7 @@ bool LocationService::removeTimer(LSMessage *message) {
     guint timerID;
     bool timerRemoved = false;
 
-    LS_LOG_INFO("size = %d", size);
+    LS_LOG_INFO("size = %lu", size);
     if (size <= 0) {
         LS_LOG_ERROR("m_locUpdate_req_table is empty");
         return false;
@@ -3998,7 +4019,7 @@ bool LocationService::LSMessageRemoveReqList(LSMessage *message) {
     guint timerID;
     bool timerRemoved  =  false;
 
-    LS_LOG_INFO("m_locUpdate_req_list size %d", size);
+    LS_LOG_INFO("m_locUpdate_req_list size %lu", size);
 
     if (size <= 0) {
         LS_LOG_ERROR("m_locUpdate_req_list is empty");

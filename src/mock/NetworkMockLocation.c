@@ -53,7 +53,8 @@ start_network_mock_server( void* param )
 {
     uint64_t u = 1;
     network_mock_server = socket( AF_INET, SOCK_STREAM, IPPROTO_TCP );
-    (void)write( network_event_fd, &u, sizeof(u) );
+    if ( write( network_event_fd, &u, sizeof(u) ) < 0 )
+        LS_LOG_DEBUG( MOCK_TAG "eventfd write failed" );
     if ( network_mock_server >= 0 ) {
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
@@ -72,18 +73,18 @@ start_network_mock_server( void* param )
                     /* allow local connection only */
                     if ( htonl(addr.sin_addr.s_addr) == 0x7f000001 ) {
                         char buf[1024];
-                        int len, pi = 0;
+                        int rlen, pi = 0;
                         static const char p[] = { '\r', '\n', '\r', '\n' };
                         LS_LOG_INFO( MOCK_TAG "client accepted" );
                         while ( pi >= 0 ) {
                             int i;
-                            len = recv( network_mock_client,
+                            rlen = recv( network_mock_client,
                                 buf, sizeof(buf) - 1, 0 );
-                            if ( len <= 0 ) break;
-                            buf[len] = 0;
-                            for ( i = 0; i < len; i++ ) {
+                            if ( rlen <= 0 ) break;
+                            buf[rlen] = 0;
+                            for ( i = 0; i < rlen; i++ ) {
                                 if ( buf[i] == p[pi] ) {
-                                    if ( pi >= sizeof(p) - 1 ) {
+                                    if ( pi >= (int)sizeof(p) - 1 ) {
                                         pi = -1;
                                         break;
                                     }
@@ -111,26 +112,27 @@ start_network_mock_server( void* param )
                                     network_event_fd : network_mock_client ) + 1,
                                     &rfds, NULL, NULL, NULL );
                                 if ( FD_ISSET(network_event_fd,&rfds) ) {
-                                    uint64_t u;
-                                    (void)read( network_event_fd, &u, sizeof(u) );
+                                    uint64_t ev;
+                                    if ( read( network_event_fd, &ev, sizeof(ev) ) < 0 )
+                                        LS_LOG_DEBUG( MOCK_TAG "eventfd read failed" );
                                     snprintf( buf, sizeof(buf), body,
                                         network_mock_lat, network_mock_lon, network_mock_acc );
-                                    len = strlen(buf);
-                                    snprintf( buf + len, sizeof(buf) - len, header, len );
-                                    send( network_mock_client, buf + len, strlen(buf + len), 0 );
-                                    send( network_mock_client, buf, len, 0 );
+                                    rlen = strlen(buf);
+                                    snprintf( buf + rlen, sizeof(buf) - rlen, header, rlen );
+                                    send( network_mock_client, buf + rlen, strlen(buf + rlen), 0 );
+                                    send( network_mock_client, buf, rlen, 0 );
                                     LS_LOG_INFO( MOCK_TAG "NETWORK: %f %f",
                                         network_mock_lat, network_mock_lon );
                                     break;
                                 }
                                 if ( FD_ISSET(network_mock_client,&rfds) ) {
-                                    len = recv( network_mock_client,
+                                    rlen = recv( network_mock_client,
                                         buf, sizeof(buf) - 1, 0 );
-                                    if ( len <= 0 ) {
+                                    if ( rlen <= 0 ) {
                                         LS_LOG_INFO( MOCK_TAG "client leaves" );
                                         break;
                                     }
-                                    buf[len] = 0;
+                                    buf[rlen] = 0;
                                 }
                             }
                         }
@@ -156,7 +158,8 @@ network_mock_location( struct _Location* loc, void* ctx )
         network_mock_lon = loc->longitude;
         network_mock_lat = loc->latitude;
         network_mock_acc = loc->horizontalAccuracy;
-        (void)write( network_event_fd, &u, sizeof(u) );
+        if ( write( network_event_fd, &u, sizeof(u) ) < 0 )
+            LS_LOG_DEBUG( MOCK_TAG "eventfd write failed" );
     } else {
         void* res;
         close_socket( &network_mock_client );
@@ -179,7 +182,8 @@ network_location_provider_url( const char* url )
 
             network_event_fd = eventfd( 0, 0 );
             pthread_create(&network_mock_server_thread, NULL, start_network_mock_server, NULL);
-            (void)read( network_event_fd, &u, sizeof(u) );
+            if ( read( network_event_fd, &u, sizeof(u) ) < 0 )
+                LS_LOG_DEBUG( MOCK_TAG "eventfd read failed" );
 
             pthread_attr_destroy( &attr );
             network_mock_location_provider.location = network_mock_location;

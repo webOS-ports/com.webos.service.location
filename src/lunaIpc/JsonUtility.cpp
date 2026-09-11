@@ -77,7 +77,7 @@ bool location_util_parsejsonAddress(jvalue_ref serviceObject, Address *addr) {
   mRetVal = jobject_get_exists(serviceObject, J_CSTR_TO_BUF("street"), &m_JsonSubArgument);
 
   if (mRetVal == true) {
-    raw_buffer nameBuf = jstring_get(m_JsonSubArgument);
+    nameBuf = jstring_get(m_JsonSubArgument);
     addr->street = g_strdup(nameBuf.m_str);
     jstring_free_buffer(nameBuf);
   }
