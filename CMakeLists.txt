@@ -15,7 +15,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
-cmake_minimum_required(VERSION 2.8.7)
+cmake_minimum_required(VERSION 3.10)
 project(location)
 
 include(webOS/webOS)
@@ -60,9 +60,46 @@ pkg_check_modules(NYXLIB REQUIRED nyx)
 add_definitions(${NYXLIB_CFLAGS})
 #include_directories(${NYXLIB_INCLUDE_DIRS})
 #webos_add_compiler_flags(ALL ${NYXLIB_CFLAGS_OTHER})
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+# Diagnostics.  The service parses attacker-reachable JSON and consumes data
+# from the GNSS HAL, so the buffer/format/bounds warnings below are treated as
+# part of the build contract rather than as advice.  -Wformat-security in
+# particular has to stay on: the recipe used to disable it (SECURITY_STRINGFORMAT)
+# because of non-literal format strings that have since been removed.
+set(LOCATION_WARNING_FLAGS
+    -Wall
+    -Wextra
+    -Wformat=2
+    -Wformat-security
+    -Wformat-overflow=2
+    -Wstringop-overflow=4
+    -Wstringop-truncation
+    -Warray-bounds=2
+    -Wvla
+    -Wuninitialized
+    -Wmaybe-uninitialized
+    -Wreturn-type
+    -Wshadow=local
+    -Wpointer-arith
+    -Wno-unused-parameter
+    # glib's LSMethod/GSimpleAsyncResult usage produces unavoidable noise here.
+    -Wno-missing-field-initializers
+    -Wno-psabi
+)
+string(REPLACE ";" " " LOCATION_WARNING_FLAGS_STR "${LOCATION_WARNING_FLAGS}")
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${LOCATION_WARNING_FLAGS_STR}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LOCATION_WARNING_FLAGS_STR}")
+
+# Opt-in: -DLOCATION_WERROR=ON in CI so regressions in the above are build breaks.
+option(LOCATION_WERROR "Treat compiler warnings as errors" OFF)
+if(LOCATION_WERROR)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+endif()
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories("${PROJECT_SOURCE_DIR}/include")
 
