@@ -91,29 +91,34 @@ nyx_error_t GPSNyxInterface::initialize(void *instance) {
 
     if (strcmp(gpsInstance->mGPSConf.mChipsetID, "Qcom") == 0) {
         mXtraClientCallbacks.user_data = this;
-        mXtraClientCallbacks.xtra_client_data_cb =
-                (nyx_gps_xtra_client_data_callback) (xtraDataCb);
-        mXtraClientCallbacks.xtra_client_time_cb =
-                (nyx_gps_xtra_client_time_callback) (xtraTimeCb);
+        /*
+         * No function-pointer casts: calling through a pointer of a different
+         * type is undefined behaviour, and the casts were hiding that these
+         * callbacks silently ignored their user_data parameter.
+         */
+        mXtraClientCallbacks.xtra_client_data_cb = xtraDataCb;
+        mXtraClientCallbacks.xtra_client_time_cb = xtraTimeCb;
 
+        /* g_strlcpy: strncpy leaves the copy unterminated when the source
+         * fills the field, and these urls come from a user-editable conf. */
         count = 0;
-        strncpy(mXtraConfig.xtra_server_url[count++],
+        g_strlcpy(mXtraConfig.xtra_server_url[count++],
                gpsInstance->mGPSConf.mXtraServer1, sizeof(mXtraConfig.xtra_server_url[0]));
-        strncpy(mXtraConfig.xtra_server_url[count++],
+        g_strlcpy(mXtraConfig.xtra_server_url[count++],
                gpsInstance->mGPSConf.mXtraServer2, sizeof(mXtraConfig.xtra_server_url[0]));
-        strncpy(mXtraConfig.xtra_server_url[count++],
+        g_strlcpy(mXtraConfig.xtra_server_url[count++],
                gpsInstance->mGPSConf.mXtraServer3, sizeof(mXtraConfig.xtra_server_url[0]));
 
         count = 0;
-        strncpy(mXtraConfig.sntp_server_url[count++],
+        g_strlcpy(mXtraConfig.sntp_server_url[count++],
                gpsInstance->mGPSConf.mNTPServer1, sizeof(mXtraConfig.sntp_server_url[0]));
-        strncpy(mXtraConfig.sntp_server_url[count++],
+        g_strlcpy(mXtraConfig.sntp_server_url[count++],
                gpsInstance->mGPSConf.mNTPServer2, sizeof(mXtraConfig.sntp_server_url[0]));
-        strncpy(mXtraConfig.sntp_server_url[count++],
+        g_strlcpy(mXtraConfig.sntp_server_url[count++],
                gpsInstance->mGPSConf.mNTPServer3, sizeof(mXtraConfig.sntp_server_url[0]));
 
         // test need to decide on UA string
-        strncpy(mXtraConfig.user_agent_string,
+        g_strlcpy(mXtraConfig.user_agent_string,
                "LE/1.2.3/OEM/Model/Board/Carrier", sizeof(mXtraConfig.user_agent_string));
 
         rc = nyx_gps_init_xtra_client(mNyxGpsSystem, &mXtraConfig,
@@ -397,13 +402,28 @@ void GPSNyxInterface::gpsSvStatusCb(nyx_gps_sv_status_t *sat_data, void *user_da
 
     {
         int index = DEFAULT_VALUE;
+        int num_svs = sat_data->num_svs;
         Satellite *sat = NULL;
-        sat = satellite_create(sat_data->num_svs);
 
-        sat->visible_satellites_count = sat_data->num_svs;
-        LS_LOG_DEBUG(" number of satellite %d : \n", sat_data->num_svs);
+        /*
+         * num_svs comes from the GNSS HAL and indexes the fixed-size sv_list
+         * array; a misbehaving HAL must not walk us past it.
+         */
+        if (num_svs < 0)
+            num_svs = 0;
+        else if (num_svs > NYX_GPS_MAX_SVS)
+            num_svs = NYX_GPS_MAX_SVS;
 
-        for (index = DEFAULT_VALUE; index < sat_data->num_svs; index++) {
+        sat = satellite_create(num_svs);
+
+        if (!sat) {
+            printf_warning("failed to allocate satellite data\n");
+            return;
+        }
+
+        LS_LOG_DEBUG(" number of satellite %d : \n", num_svs);
+
+        for (index = DEFAULT_VALUE; index < num_svs; index++) {
             bool used = FALSE;
             bool hasephemeris = FALSE;
             bool hasalmanac = FALSE;
@@ -413,19 +433,26 @@ void GPSNyxInterface::gpsSvStatusCb(nyx_gps_sv_status_t *sat_data, void *user_da
             gdouble elev = (gdouble)sat_data->sv_list[index].elevation;
             gdouble azim = (gdouble)sat_data->sv_list[index].azimuth;
 
-            ((sat_data->used_in_fix_mask & (1 << (prn - 1)))) == DEFAULT_VALUE ?
-                    (used = FALSE) : (used = TRUE);
-            ((sat_data->ephemeris_mask & (1 << (prn - 1)))) == DEFAULT_VALUE ?
-                    (hasephemeris = FALSE) : (hasephemeris = TRUE);
-            ((sat_data->almanac_mask & (1 << (prn - 1)))) == DEFAULT_VALUE ?
-                    (hasalmanac = FALSE) : (hasalmanac = TRUE);
+            /*
+             * The per-satellite masks are 32 bits wide and indexed by PRN;
+             * shifting by prn-1 for a PRN outside [1, 32] (GLONASS/BeiDou ids
+             * go far higher) was undefined behaviour.  Satellites beyond the
+             * mask's reach simply report no flags.
+             */
+            if (prn >= 1 && prn <= 32) {
+                guint32 bit = 1u << (prn - 1);
+
+                used = (sat_data->used_in_fix_mask & bit) ? TRUE : FALSE;
+                hasephemeris = (sat_data->ephemeris_mask & bit) ? TRUE : FALSE;
+                hasalmanac = (sat_data->almanac_mask & bit) ? TRUE : FALSE;
+            }
 
             set_satellite_details(sat, index, snr, prn, elev, azim, used,
                     hasalmanac, hasephemeris);
         }
 
         //call satellite cb
-        if (sat_data->num_svs > DEFAULT_VALUE) {
+        if (num_svs > DEFAULT_VALUE) {
             if (providerInstance->mAPIProgressFlag & SATELLITE_GET_DATA_ON)
                 providerInstance->getCallback()->getGpsSatelliteDataCb(sat);
         }
@@ -578,7 +605,7 @@ void GPSNyxInterface::gpsXtraDownloadRequestCb(void *user_data) {
         return;
 
     if (gpsNyxInterface->mXtraDefault) {
-	    GThread *downloadThread = g_thread_new("download xtra", (GThreadFunc)xtraDataDownloadThread, user_data);
+	    GThread *downloadThread = g_thread_new("download xtra", xtraDataDownloadThread, user_data);
 	    if (!downloadThread) {
 		    printf_warning("failed to create xtra download thread\n");
 	    }
@@ -758,15 +785,20 @@ void GPSNyxInterface::geofenceResumeCb(int32_t geofenceId, int32_t status,void *
     printf_debug("geofenceResumeCb emitting\n");
 }
 
-void GPSNyxInterface::xtraDataCb(char *data, int length) {
+void GPSNyxInterface::xtraDataCb(char *data, int length, void *user_data) {
     GPSPositionProvider *gpsService = GPSPositionProvider::getInstance();
 
     printf_debug("enter xtraDataCb\n");
 
     pthread_mutex_lock(&gpsService->mGPSThreadMutex);
-    
-    if(data != nullptr) {
-    	gpsService->mXtraData.data = data;
+
+    /*
+     * Xtra assistance data is binary.  Assigning the bare pointer scanned for
+     * a NUL, which both truncated the blob at the first zero byte and read
+     * past its end when it contained none.  Copy exactly length bytes.
+     */
+    if (data != nullptr && length > 0) {
+        gpsService->mXtraData.data.assign(data, (size_t) length);
     }
 
     gpsService->mGPSThreadAction = ACTION_XTRA_DATA;
@@ -778,7 +810,7 @@ void GPSNyxInterface::xtraDataCb(char *data, int length) {
 }
 
 void GPSNyxInterface::xtraTimeCb(int64_t utcTime, int64_t timeReference,
-                                 int uncertainty) {
+                                 int uncertainty, void *user_data) {
     GPSPositionProvider *gpsService = GPSPositionProvider::getInstance();
 
     printf_debug("enter xtraTimeCb\n");
@@ -796,11 +828,10 @@ void GPSNyxInterface::xtraTimeCb(int64_t utcTime, int64_t timeReference,
     pthread_mutex_unlock(&gpsService->mGPSThreadMutex);
 }
 
-void GPSNyxInterface::xtraDataDownloadThread(void *arg) {
+gpointer GPSNyxInterface::xtraDataDownloadThread(gpointer arg) {
     int nextserverindex = 0;
-    int noofservers = 3;
     int count = 0;
-    char *xtraservers[noofservers];
+    char *xtraservers[3];
     const char *ACCEPT =
             "Accept:, application/vnd.wap.mms-message, application/vnd.wap.sic";
     const char *XWAP_PROFILE =
@@ -867,6 +898,7 @@ void GPSNyxInterface::xtraDataDownloadThread(void *arg) {
     }
 
     providerInstance->mDownloadXtraDataStatus = IDLE;
+    return nullptr;
 }
 
 void GPSNyxInterface::onRequestCompleted(NtpErrors error, const NTPData *data) {

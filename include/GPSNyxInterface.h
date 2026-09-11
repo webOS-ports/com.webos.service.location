@@ -73,9 +73,9 @@ public:
     static void gpsXtraDownloadRequestCb(void *user_data);
     static void nfwNotifyCb(nyx_gps_nfw_notification_t *notification, void *user_data);
     void injectSystemTime();
-    static void xtraTimeCb(int64_t utcTime, int64_t timeReference, int uncertainty);
-    static void xtraDataCb(char *data, int length);
-    static void xtraDataDownloadThread(void *arg);
+    static void xtraTimeCb(int64_t utcTime, int64_t timeReference, int uncertainty, void *user_data);
+    static void xtraDataCb(char *data, int length, void *user_data);
+    static gpointer xtraDataDownloadThread(gpointer arg);
     static void geofenceResumeCb(int32_t geofence_id, int32_t status, void *user_data);
     static void geofencePauseCb(int32_t geofence_id, int32_t status, void *user_data);
     static void geofenceRemoveCb(int32_t geofence_id, int32_t status, void *user_data);
