@@ -17,6 +17,8 @@
 
 #include "NtpClient.h"
 
+#include <inttypes.h>
+
 #include <glib.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -50,13 +52,14 @@ bool NtpClient::start(GPSServiceConfig *config, INtpClinetCallback *callback) {
     mCallback = callback;
     mConfig = config;
     mDownloadNtpDataStatus = NtpDownloadState::NTPDOWNLOADING;
-    GThread *ntpThread = g_thread_new("download ntp time", (GThreadFunc) NtpClient::ntpDownloadThread, this);
+    GThread *ntpThread = g_thread_new("download ntp time", NtpClient::ntpDownloadThread, this);
 
     if (!ntpThread) {
         LS_LOG_ERROR("failed to create ntp download thread\n");
+        /* Nothing is downloading: leaving the state latched here wedged every
+         * future time-injection request for the life of the process. */
+        mDownloadNtpDataStatus = NtpDownloadState::NTPIDLE;
         mCallback->onRequestCompleted(NtpErrors::CONNECTION_PROBLEM, nullptr);
-        // No additional resource management is typically needed for a failed g_thread_new
-        // But handle any other necessary cleanup or state management here
         return false;
     }
 
@@ -64,22 +67,20 @@ bool NtpClient::start(GPSServiceConfig *config, INtpClinetCallback *callback) {
     return true;
 }
 
-void NtpClient::ntpDownloadThread(void *arg) {
-    //Casting in c style ?? bad ??
+gpointer NtpClient::ntpDownloadThread(gpointer arg) {
     NtpClient *ntpClient = (NtpClient *) arg;
 
     GPSServiceConfig mGPSConf = *ntpClient->mConfig;
     struct sockaddr_in sock_addr;
     struct hostent *he;
     struct timeval tval;
+    struct timeval recv_timeout;
     struct ntp_packet pkt;
     int usd = -1;
-    int timeout;
     int nextserverindex = 0;
-    int noofservers = 3;
     int count = 0;
     long int len = 0;
-    char *ntpservers[noofservers];
+    char *ntpservers[3];
 
     LS_LOG_DEBUG("enter NtpClient::ntpDownloadThread\n");
 
@@ -95,7 +96,9 @@ void NtpClient::ntpDownloadThread(void *arg) {
 
     if (!count) {
         LS_LOG_ERROR("No NTP servers were specified in the GPS configuration\n");
-        return;
+        ntpClient->mDownloadNtpDataStatus = NtpDownloadState::NTPIDLE;
+        ntpClient->mCallback->onRequestCompleted(NtpErrors::CONNECTION_PROBLEM, nullptr);
+        return nullptr;
     }
 
     LS_LOG_DEBUG("ntp download thread started\n");
@@ -105,7 +108,9 @@ void NtpClient::ntpDownloadThread(void *arg) {
 
         if (-1 == (usd = socket(AF_INET, SOCK_DGRAM, 0))) {
             LS_LOG_ERROR("ntp download socket error\n");
-            return;
+            ntpClient->mDownloadNtpDataStatus = NtpDownloadState::NTPIDLE;
+            ntpClient->mCallback->onRequestCompleted(NtpErrors::CONNECTION_PROBLEM, nullptr);
+            return nullptr;
         }
 
         if ((he = gethostbyname(ntpservers[nextserverindex]))) {
@@ -124,8 +129,14 @@ void NtpClient::ntpDownloadThread(void *arg) {
                 //if system is using 64bit htonl takes  uint32_t then this passing is right ??
                 pkt.originateTimeStampSecs = htonl(time(nullptr) + NTP_EPOCH);
                 (void)send(usd, &pkt, sizeof(pkt), 0);
-                timeout = NTP_REPLY_TIMEOUT;
-                (void)setsockopt(usd, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeout, sizeof(int));
+                /*
+                 * SO_RCVTIMEO takes a struct timeval.  Passing an int holding
+                 * milliseconds made the kernel read 6000 (and stack garbage)
+                 * as seconds, so the recv timeout was 100 minutes, not 6s.
+                 */
+                recv_timeout.tv_sec = NTP_REPLY_TIMEOUT / 1000;
+                recv_timeout.tv_usec = (NTP_REPLY_TIMEOUT % 1000) * 1000;
+                (void)setsockopt(usd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
 
                 LS_LOG_DEBUG("connected to socket, call recv\n");
 
@@ -142,7 +153,7 @@ void NtpClient::ntpDownloadThread(void *arg) {
                     //TODO :: RoundTripTime is int ??? should be unsigned long ?
                     int RoundTripTime = responseTicks - requestTicks -
                                         (pkt.transmitTimeStampSecs - pkt.receiveTimeStampSeqs);
-                    LS_LOG_INFO("NtpTime = %lld and NtpTimeReference = %lld and RoundTripTime=%d\n tval.tv_sec= %ld\n",
+                    LS_LOG_INFO("NtpTime = %" PRId64 " and NtpTimeReference = %" PRId64 " and RoundTripTime=%d\n tval.tv_sec= %ld\n",
                                  NtpTime,
                                  NtpTimeReference,
                                  RoundTripTime,
@@ -178,6 +189,7 @@ void NtpClient::ntpDownloadThread(void *arg) {
         close(usd);
 
     ntpClient->mDownloadNtpDataStatus = NtpDownloadState::NTPIDLE;
+    return nullptr;
 }
 
 int64_t NtpClient::getElapsedRealtime() {
