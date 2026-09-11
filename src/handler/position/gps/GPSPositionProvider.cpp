@@ -194,22 +194,22 @@ bool GPSPositionProvider::handleGpsDisable(void *data) {
         if (mCEPLogEnable) {
             char cep_info[256];
 
-            sprintf(cep_info, "Reference Position: %f, %f\n",
+            snprintf(cep_info, sizeof(cep_info), "Reference Position: %f, %f\n",
                     loc_geometry_rtcep_get_ref_position(&mCEPCalculator)->latitude,
                     loc_geometry_rtcep_get_ref_position(&mCEPCalculator)->longitude);
 
             loc_logger_feed_data(&mCEPLogger, cep_info, strlen(cep_info));
 
-            sprintf(cep_info, "Maximum count of measurement: %d\n",
+            snprintf(cep_info, sizeof(cep_info), "Maximum count of measurement: %d\n",
                     loc_geometry_rtcep_get_max_count(&mCEPCalculator));
 
             loc_logger_feed_data(&mCEPLogger, cep_info, strlen(cep_info));
 
-            sprintf(cep_info, "Measured count: %d\n",
+            snprintf(cep_info, sizeof(cep_info), "Measured count: %d\n",
                     loc_geometry_rtcep_get_current_count(&mCEPCalculator));
 
             loc_logger_feed_data(&mCEPLogger, cep_info, strlen(cep_info));
-            sprintf(cep_info,
+            snprintf(cep_info, sizeof(cep_info),
                     "CEP (50): %f\nDRMS (63 ~ 68): %f\n2DRMS (95 ~ 98): %f\nR95 (= CEP 95): %f\n",
                     loc_geometry_rtcep_get_cep(&mCEPCalculator),
                     loc_geometry_rtcep_get_drms(&mCEPCalculator),
@@ -282,27 +282,43 @@ bool GPSPositionProvider::handleCEPLog(void *data) {
     int max_count;
     ref_lat = ref_lon = 0;
     max_count = 0;
+
+    if (cvalue == nullptr)
+        return false;
+
+    /*
+     * The payload is "enable_cep_log:<lat>,<lon>,<count>" and arrives verbatim
+     * from the sendExtraCommand luna call.  The segment lengths were used as
+     * strncpy counts without being clamped to the destination, so a caller
+     * could overflow temp[] just by sending a long enough field.
+     */
     cep_values = strchr(cvalue, ':');
     if (cep_values) {
+        size_t seglen;
         // latitude of the known position for CEP
         offset = strchr(cep_values + 1, ',');
         if (offset) {
-            memset(temp, 0, 256);
-            strncpy(temp, cep_values + 1, offset - cep_values - 1);
-            ref_lat = atof(temp);
+            memset(temp, 0, sizeof(temp));
+            seglen = (size_t)(offset - cep_values - 1);
+            if (seglen >= sizeof(temp))
+                seglen = sizeof(temp) - 1;
+            memcpy(temp, cep_values + 1, seglen);
+            ref_lat = g_ascii_strtod(temp, nullptr);
             cep_values = offset;
         }
         // longitude of the known position for CEP
         offset = strchr(cep_values + 1, ',');
         if (offset) {
-            memset(temp, 0, 256);
-            strncpy(temp, cep_values + 1, offset - cep_values - 1);
-            ref_lon = atof(temp);
+            memset(temp, 0, sizeof(temp));
+            seglen = (size_t)(offset - cep_values - 1);
+            if (seglen >= sizeof(temp))
+                seglen = sizeof(temp) - 1;
+            memcpy(temp, cep_values + 1, seglen);
+            ref_lon = g_ascii_strtod(temp, nullptr);
             cep_values = offset;
         }
         // maximum count of measurements for CEP
-        memset(temp, 0, 256);
-        strncpy(temp, cep_values + 1, sizeof(temp)-1);
+        g_strlcpy(temp, cep_values + 1, sizeof(temp));
         max_count = atoi(temp);
     }
     if (0 != ref_lat && 0 != ref_lon) {
@@ -433,7 +449,7 @@ bool GPSPositionProvider::handleSetGpsParameterCommand(void *data) {
     }
     pos_mode = mGPSConf.mLgeGPSPositionMode;
     fix_interval = DEFAULT_FIX_INTERVAL;
-    strncpy(supl_host, mGPSConf.mSUPLHost, sizeof(supl_host));
+    g_strlcpy(supl_host, mGPSConf.mSUPLHost, sizeof(supl_host));
     supl_port = mGPSConf.mSUPLPort;
     if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("posmode"),
                            &jsonSubObject)) {
@@ -446,7 +462,7 @@ bool GPSPositionProvider::handleSetGpsParameterCommand(void *data) {
     if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("supladdress"),
                            &jsonSubObject)) {
         raw_buffer nameBuf = jstring_get(jsonSubObject);
-        strncpy(supl_host, nameBuf.m_str, sizeof(supl_host)-1);
+        g_strlcpy(supl_host, (nameBuf.m_str != nullptr) ? nameBuf.m_str : "", sizeof(supl_host));
         jstring_free_buffer(nameBuf);
     }
     if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("suplport"),
