@@ -160,10 +160,21 @@ public:
             m_sh = sh;
             m_handlerType = handlerType;
             timerStart = true;
+            /*
+             * MIN(MAX, ...) did not mean what it reads as: MAX is glib's
+             * two-argument macro, so with no argument list it fell through to
+             * the only MAX in scope - FeatureType::MAX, the geocoding
+             * feature-type enumerator, whose value is 6.  Every subscription
+             * key was therefore truncated to six bytes and, because six is
+             * shorter than any real key, left unterminated: "gps/getLocationU-
+             * pdate" became "gps/ge" followed by whatever was on the stack.
+             * getKey() hands that to LSSubscriptionAcquire, so the timeout path
+             * looked up a garbage key and read past the buffer doing it.
+             */
+            memset(key, 0x00, sizeof(key));
+
             if (argkey != NULL)
-                memcpy(key, argkey, MIN(MAX,strlen(argkey) + 1));
-            else
-                memset(key, 0x00, KEY_MAX);
+                g_strlcpy(key, argkey, sizeof(key));
         }
 
         LSHandle *GetHandle() const {
@@ -511,6 +522,8 @@ private:
     static LSMethod mockPublicMethod[];
     static LSMethod mockPrivateMethod[];
     bool is_geofenceId_used[MAX_GEOFENCE_ID];
+    static bool buildGetStateSubscriptionKey(char *dest, size_t destLen, const char *handler);
+    bool geofenceSlot(int geofenceId, int *slot);
     GHashTable *htPseudoGeofence;
     LSHandle *mServiceHandle;
 

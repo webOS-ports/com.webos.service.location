@@ -104,6 +104,42 @@ LSMethod LocationService::mockPrivateMethod[] = {
     { 0, 0 },
 };
 
+/*
+ * getState subscriptions are keyed on "<handler><SUBSC_GET_STATE_KEY>".  Both
+ * getState and setState have to derive the identical string or a state change
+ * is never delivered, so the construction lives in one place and reports
+ * truncation instead of producing a key that silently does not match.
+ */
+bool LocationService::buildGetStateSubscriptionKey(char *dest, size_t destLen, const char *handler) {
+    if (dest == NULL || destLen == 0 || handler == NULL)
+        return false;
+
+    int written = snprintf(dest, destLen, "%s%s", handler, SUBSC_GET_STATE_KEY);
+
+    return (written > 0) && ((size_t) written < destLen);
+}
+
+/*
+ * Geofence IDs live in [MIN_GEOFENCE_RANGE, MAX_GEOFENCE_RANGE] and index
+ * is_geofenceId_used[MAX_GEOFENCE_ID].  Those two ranges do not agree - the
+ * span is 201 wide and the array is 200 - and IDs also arrive from the GNSS
+ * HAL's geofence callbacks, which are not bound by anything this service
+ * chose.  Every indexed access goes through here.
+ */
+bool LocationService::geofenceSlot(int geofenceId, int *slot) {
+    int index = geofenceId - MIN_GEOFENCE_RANGE;
+
+    if (index < 0 || index >= MAX_GEOFENCE_ID) {
+        LS_LOG_ERROR("geofence id %d is outside the usable range", geofenceId);
+        return false;
+    }
+
+    if (slot != NULL)
+        *slot = index;
+
+    return true;
+}
+
 LocationService *LocationService::getInstance() {
     static LocationService _instance;
     return &_instance;
@@ -142,7 +178,7 @@ void LocationService::LSErrorPrintAndFree(LSError *ptrLSError) {
 }
 
 bool LocationService::init(GMainLoop *mainLoop) {
-    memset(is_geofenceId_used, 0x00, MAX_GEOFENCE_ID);
+    memset(is_geofenceId_used, 0x00, sizeof(is_geofenceId_used));
 
     if (locationServiceRegister(LOCATION_SERVICE_NAME, mainLoop, &mServiceHandle) == false) {
         LS_LOG_ERROR("com.webos.service.location service registration failed");
@@ -903,11 +939,26 @@ bool LocationService::getState(LSHandle *sh, LSMessage *message, void *data) {
         if ((isSubscribeTypeValid(sh, message, false, &isSubscription)) && isSubscription) {
             //Add to subscription list with handler+method name
             char subscription_key[MAX_GETSTATE_PARAM];
-            strncpy(subscription_key, handler, sizeof(handler));
-            subscription_key[sizeof(handler)+1] = '\0';
-            LS_LOG_INFO("handler_key=%s len =%zu", subscription_key, (strlen(SUBSC_GET_STATE_KEY) + strlen(handler)));
 
-            if (LSSubscriptionAdd(sh, strncat(subscription_key, SUBSC_GET_STATE_KEY, strlen(SUBSC_GET_STATE_KEY)), message, &mLSError) == false) {
+            /*
+             * sizeof(handler) is the size of a char*, not of the string.  On
+             * 64-bit that copied 8 bytes, which happens to cover "network" and
+             * its terminator; on armv7 it copied 4, so "network" became "netw"
+             * with no terminator, and the following write landed at index 5 and
+             * left index 4 uninitialised for strlen() to walk into.  The
+             * subscription key that came out of that did not match the one
+             * setState later replies on, so getState subscribers on 32-bit
+             * silently never received an update.
+             */
+            if (!buildGetStateSubscriptionKey(subscription_key, sizeof(subscription_key), handler)) {
+                LS_LOG_ERROR("Handler name too long for a getState subscription key");
+                LSMessageReplyError(sh, message, LOCATION_INVALID_INPUT);
+                goto EXIT;
+            }
+
+            LS_LOG_INFO("handler_key=%s len=%zu", subscription_key, strlen(subscription_key));
+
+            if (LSSubscriptionAdd(sh, subscription_key, message, &mLSError) == false) {
                 LS_LOG_ERROR("Failed to add to subscription list");
                 LSErrorPrintAndFree(&mLSError);
                 LSMessageReplyError(sh, message, LOCATION_UNKNOWN_ERROR);
@@ -1036,9 +1087,14 @@ bool LocationService::setState(LSHandle *sh, LSMessage *message, void *data) {
 
         LSERROR_CHECK_AND_PRINT(bRetVal, mLSError);
 
-        strncpy(subscription_key, handler, sizeof(handler));
-	    subscription_key[sizeof(handler)+1] = '\0';
-        strncat(subscription_key, SUBSC_GET_STATE_KEY, strlen(SUBSC_GET_STATE_KEY));
+        if (!buildGetStateSubscriptionKey(subscription_key, sizeof(subscription_key), handler)) {
+            LS_LOG_ERROR("Handler name too long for a getState subscription key");
+            j_release(&handlersArrayItem1);
+            j_release(&handlersArrayItem);
+            j_release(&handlersArray);
+            errorCode = LOCATION_INVALID_INPUT;
+            goto EXIT;
+        }
 
         if ((strcmp(handler, GPS) == 0) && mGpsStatus != state) {
             mGpsStatus = state;
@@ -1646,7 +1702,13 @@ bool LocationService::addGeofenceArea(LSHandle *sh, LSMessage *message, void *da
     ErrorCodes ret;
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(MIN_GEOFENCE_RANGE, MAX_GEOFENCE_RANGE);
+    /*
+     * uniform_int_distribution is inclusive at both ends, so the old
+     * [MIN_GEOFENCE_RANGE, MAX_GEOFENCE_RANGE] span could yield
+     * MAX_GEOFENCE_RANGE and index one past the end of a 200-entry array.
+     * Bound the draw by the array instead of by the unrelated range constants.
+     */
+    std::uniform_int_distribution<> dis(MIN_GEOFENCE_RANGE, MIN_GEOFENCE_RANGE + MAX_GEOFENCE_ID - 1);
 
     LS_LOG_DEBUG("=======addGeofenceArea=======\n");
 
@@ -1675,21 +1737,31 @@ bool LocationService::addGeofenceArea(LSHandle *sh, LSMessage *message, void *da
         jnumber_get_f64(jsonSubObject, &radius);
     request.setGeofenceCoordinates(longitude, latitude, radius);
 
-     /* Generate random Geofence Id which is not used by previous request */
-    while (count < (MAX_GEOFENCE_RANGE - MIN_GEOFENCE_RANGE)) {
-	geofenceId = dis(gen);
-        LS_LOG_DEBUG("=======addGeofenceArea ID genrated %d=======\n", geofenceId);
+    /* Generate a random geofence id that is not already in use. */
+    geofenceId = -1;
 
-        if (!is_geofenceId_used[geofenceId - MIN_GEOFENCE_RANGE]) {
-            is_geofenceId_used[geofenceId - MIN_GEOFENCE_RANGE] = true;
+    for (count = 0; count < MAX_GEOFENCE_ID; count++) {
+        int candidate = dis(gen);
+        int slot;
+
+        if (!geofenceSlot(candidate, &slot))
+            continue;
+
+        if (!is_geofenceId_used[slot]) {
+            is_geofenceId_used[slot] = true;
+            geofenceId = candidate;
             break;
         }
-
-        count++;
     }
 
-    if (count == (MAX_GEOFENCE_ID - MIN_GEOFENCE_RANGE)) {
-        LS_LOG_DEBUG("MAX_GEOFENCE_ID reached\n");
+    /*
+     * The exhaustion test used to compare count against
+     * MAX_GEOFENCE_ID - MIN_GEOFENCE_RANGE, which is -800 and therefore never
+     * true; when every slot was taken the loop fell through and reused the last
+     * (already-live) id it happened to draw.
+     */
+    if (geofenceId < 0) {
+        LS_LOG_ERROR("no free geofence id available");
         errorCode = LOCATION_GEOFENCE_TOO_MANY_GEOFENCE;
         goto EXIT;
     }
@@ -2339,20 +2411,22 @@ int LocationService::enableHandlers(int sel_handler, char *key, unsigned char *s
     bool gpsHandlerStatus;
     bool nwHandlerStatus;
 
+    /*
+     * Each of these used to write a stray terminator at sizeof(literal)+1 -
+     * one byte past the NUL that strncpy had already placed - leaving a hole
+     * in the buffer.  g_strlcpy bounds against the destination and always
+     * terminates; the caller's buffer is KEY_MAX.
+     */
     switch (sel_handler) {
         case LocationService::GETLOC_UPDATE_GPS:
-            if (enableGpsHandler(startedHandlers)) {
-                strncpy(key, SUBSC_GET_LOC_UPDATES_GPS_KEY,sizeof(SUBSC_GET_LOC_UPDATES_GPS_KEY));
-		        key[sizeof(SUBSC_GET_LOC_UPDATES_GPS_KEY)+1] = '\0';
-            }
+            if (enableGpsHandler(startedHandlers))
+                g_strlcpy(key, SUBSC_GET_LOC_UPDATES_GPS_KEY, KEY_MAX);
 
             break;
 
         case LocationService::GETLOC_UPDATE_NW:
-            if (enableNwHandler(startedHandlers)) {
-                strncpy(key, SUBSC_GET_LOC_UPDATES_NW_KEY,sizeof(SUBSC_GET_LOC_UPDATES_NW_KEY));
-		        key[sizeof(SUBSC_GET_LOC_UPDATES_NW_KEY)+1] = '\0';
-            }
+            if (enableNwHandler(startedHandlers))
+                g_strlcpy(key, SUBSC_GET_LOC_UPDATES_NW_KEY, KEY_MAX);
 
             break;
 
@@ -2360,16 +2434,13 @@ int LocationService::enableHandlers(int sel_handler, char *key, unsigned char *s
             gpsHandlerStatus = enableGpsHandler(startedHandlers);
             nwHandlerStatus = enableNwHandler(startedHandlers);
 
-            if (gpsHandlerStatus || nwHandlerStatus) {
-                strncpy(key, SUBSC_GET_LOC_UPDATES_HYBRID_KEY,sizeof(SUBSC_GET_LOC_UPDATES_HYBRID_KEY));
-		        key[sizeof(SUBSC_GET_LOC_UPDATES_HYBRID_KEY)+1] = '\0';
-            }
+            if (gpsHandlerStatus || nwHandlerStatus)
+                g_strlcpy(key, SUBSC_GET_LOC_UPDATES_HYBRID_KEY, KEY_MAX);
 
             break;
 
         case LocationService::GETLOC_UPDATE_PASSIVE:
-            strncpy(key, SUBSC_GET_LOC_UPDATES_PASSIVE_KEY, sizeof(SUBSC_GET_LOC_UPDATES_PASSIVE_KEY));
-	        key[sizeof(SUBSC_GET_LOC_UPDATES_PASSIVE_KEY)+1] = '\0';
+            g_strlcpy(key, SUBSC_GET_LOC_UPDATES_PASSIVE_KEY, KEY_MAX);
             break;
 
         default:
@@ -2819,7 +2890,10 @@ void LocationService::geofence_add_reply(int32_t geofenceId, int32_t status)
     }
 
     if (LOCATION_SUCCESS != errorCode) {
-        is_geofenceId_used[geofenceId - MIN_GEOFENCE_RANGE] = false;
+        int slot;
+
+        if (geofenceSlot(geofenceId, &slot))
+            is_geofenceId_used[slot] = false;
 
         retString = LSMessageGetErrorReply(errorCode);
     } else {
@@ -3216,7 +3290,10 @@ void LocationService :: sendGeofenceRemoveData(GObject *source, GAsyncResult *re
                                                          strGeofenceId,
                                                          geofenceRemoveData->geofenceString);
 
-        locService->is_geofenceId_used[geofenceRemoveData->geofenceId- MIN_GEOFENCE_RANGE] = false;
+        int slot;
+
+        if (locService->geofenceSlot(geofenceRemoveData->geofenceId, &slot))
+            locService->is_geofenceId_used[slot] = false;
 
         if ((locService->htPseudoGeofence) != NULL) {
             GHashTableIter iter;
@@ -3485,7 +3562,10 @@ bool LocationService::cancelSubscription(LSHandle *sh, LSMessage *message, void 
                 if (geofenceid_ptr) {
                     geofenceid = GPOINTER_TO_INT(geofenceid_ptr);
 
-                    is_geofenceId_used[geofenceid - MIN_GEOFENCE_RANGE] = false;
+                    int slot;
+
+                    if (geofenceSlot(geofenceid, &slot))
+                        is_geofenceId_used[slot] = false;
 
                     PositionRequest request("GPS", REMOVE_GEOFENCE_CMD);
                     request.setGeofenceID(geofenceid);
