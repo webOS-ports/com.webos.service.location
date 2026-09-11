@@ -131,9 +131,7 @@ string MapServicesImpl::formatUrl(string geoData, std::string url, const char *k
     string urlToSign;
     std::string subUrlToSign;
     std::string stDecodeKey;
-    std::string tmpDecodeKey;
     std::size_t pos;
-    int retAPIKey = LOC_SECURITY_ERROR_FAILURE;
 
     if (url.empty()) {
         LS_LOG_ERROR("URL not valid");
@@ -162,12 +160,16 @@ string MapServicesImpl::formatUrl(string geoData, std::string url, const char *k
 
      //Decode the private key
     decodedKey = g_base64_decode(key, &size);
-    if (NULL == decodedKey) {
+    if (NULL == decodedKey || 0 == size) {
         goto EXIT;
     }
 
-    tmpDecodeKey = string(reinterpret_cast< const char * > (decodedKey));
-    stDecodeKey.assign(tmpDecodeKey, 0, size-1);
+    /*
+     * g_base64_decode returns raw bytes with no terminator; constructing a
+     * string from the bare pointer scanned the heap for a NUL.  Give the
+     * constructor the length instead.
+     */
+    stDecodeKey.assign(reinterpret_cast<const char *>(decodedKey), size);
     urlToSign = subUrlToSign + geoData + "&key=" + stDecodeKey;
 
     hmac = g_hmac_new(G_CHECKSUM_SHA1, decodedKey, size);
