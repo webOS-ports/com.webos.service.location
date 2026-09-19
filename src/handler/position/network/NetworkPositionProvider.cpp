@@ -669,8 +669,10 @@ void NetworkPositionProvider::Handle_WifiInternetNotification(bool status) {
 
 }
 
-void NetworkPositionProvider::Handle_SuspendedNotification(bool status) {
-
+void NetworkPositionProvider::Handle_KernelResumeNotification() {
+    /* Nothing to do: an active network request keeps its getNetworks
+     * subscription across a sleep, and WiFi power/scanning is never touched
+     * from here on a sleepd signal. */
 }
 
 template<typename T>

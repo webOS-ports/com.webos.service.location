@@ -183,6 +183,12 @@ if(LOCATION_BUILD_TESTS)
     add_executable(test_ntp_packet tests/test_ntp_packet.cpp)
     target_link_libraries(test_ntp_packet ${GLIB2_LDFLAGS})
     add_test(NAME ntp_packet COMMAND test_ntp_packet)
+
+    add_executable(test_sleepd_signals
+        tests/test_sleepd_signals.cpp
+        src/lunaIpc/SleepdSignals.cpp)
+    target_link_libraries(test_sleepd_signals ${GLIB2_LDFLAGS} ${LIBPBNJSON_LDFLAGS})
+    add_test(NAME sleepd_signals COMMAND test_sleepd_signals)
 endif()
 
 install(DIRECTORY include/

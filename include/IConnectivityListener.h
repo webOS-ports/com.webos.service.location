@@ -29,7 +29,10 @@ public:
 
     virtual void Handle_WifiInternetNotification(bool) = 0;
 
-    virtual void Handle_SuspendedNotification(bool) = 0;
+    /* The device really slept and the kernel woke it up again (sleepd
+     * "resume" with resumetype kernel). Never called for refused or
+     * abandoned suspend attempts. */
+    virtual void Handle_KernelResumeNotification() = 0;
 };
 
 #endif

@@ -16,21 +16,10 @@
 
 
 #include "ConnectionStateObserver.h"
+#include "SleepdSignals.h"
 #include <loc_log.h>
 #include <JsonUtility.h>
 #include <algorithm>
-
-/*
- * JSON SCHEMA: _suspended_cb ()
- */
-#define JSCHEMA_SIGNAL_SUSPEND             SCHEMA_NONE
-
-/*
- * JSON SCHEMA: _resume_cb ()
- */
-#define JSCHEMA_SIGNAL_RESUME              STRICT_SCHEMA(\
-    PROPS_1(PROP(resumetype, integer)) \
-    REQUIRED_1(resumetype))
 
 
 void ConnectionStateObserver::RegisterListener(IConnectivityListener *l) {
@@ -91,18 +80,13 @@ void ConnectionStateObserver::init(LSHandle *ConnHandle) {
         LSErrorFree(&lserror);
     }
 
-    result = LSCall(ConnHandle,
-                    "luna://com.webos.service.bus/signal/addmatch",
-                    "{\"category\":\"/com/palm/power\", \"method\":\"suspended\"}",
-                    ConnectionStateObserver::suspended_cb,
-                    this,
-                    NULL,
-                    &lserror);
-    if (!result) {
-        LSErrorPrint(&lserror, stderr);
-        LSErrorFree(&lserror);
-    }
-
+    /*
+     * Only sleepd's "resume" is watched. Its "suspended" is broadcast before
+     * every attempt and says nothing about whether the device slept (see
+     * SleepdSignals.h); acting on it stopped the GPS engine on each attempt
+     * and restarted it on the abort that followed. A real sleep is known
+     * from the kernel-typed "resume" alone.
+     */
     result = LSCall(ConnHandle,
                     "luna://com.webos.service.bus/signal/addmatch",
                     "{\"category\":\"/com/palm/power\", \"method\":\"resume\"}",
@@ -116,61 +100,31 @@ void ConnectionStateObserver::init(LSHandle *ConnHandle) {
     }
 }
 
-bool ConnectionStateObserver::_suspended_cb(LSHandle *sh, LSMessage *msg) {
-    jvalue_ref parsedObj = NULL;
-    JSchemaInfo schemaInfo;
-
-    jschema_ref input_schema = jschema_parse(j_cstr_to_buffer(JSCHEMA_SIGNAL_SUSPEND), DOMOPT_NOOPT, NULL);
-    if (!input_schema)
-        return true;
-
-    jschema_info_init(&schemaInfo, input_schema, NULL, NULL);
-    parsedObj = jdom_parse(j_cstr_to_buffer(LSMessageGetPayload(msg)), DOMOPT_NOOPT, &schemaInfo);
-    jschema_release(&input_schema);
-
-    if (jis_null(parsedObj))
-        return true;
-
-    LS_LOG_INFO("_suspended_cb called, %s\n", LSMessageGetPayload(msg));
-
-    Notify_SuspendedStateChange(true);
-
-    j_release(&parsedObj);
-
-    return true;
-}
-
 bool ConnectionStateObserver::_resume_cb(LSHandle *sh, LSMessage *msg) {
-    int resumetype;
-    jvalue_ref jsonSubObj = NULL;
-    jvalue_ref parsedObj = NULL;
-    JSchemaInfo schemaInfo;
+    const char *payload = LSMessageGetPayload(msg);
+    int resumetype = sleepdParseResumeType(payload);
 
-    jschema_ref input_schema = jschema_parse(j_cstr_to_buffer(JSCHEMA_SIGNAL_RESUME), DOMOPT_NOOPT, NULL);
-    if (!input_schema)
+    if (resumetype < 0) {
+        /* the addmatch reply itself, or a malformed broadcast */
+        LS_LOG_DEBUG("ignoring /com/palm/power/resume without resumetype: %s",
+                     payload ? payload : "(null)");
         return true;
-
-    jschema_info_init(&schemaInfo, input_schema, NULL, NULL);
-    parsedObj = jdom_parse(j_cstr_to_buffer(LSMessageGetPayload(msg)), DOMOPT_NOOPT, &schemaInfo);
-    jschema_release(&input_schema);
-
-    if (jis_null(parsedObj))
-        return true;
-
-    LS_LOG_INFO("_resume_cb called, %s\n", LSMessageGetPayload(msg));
-
-    if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("resumetype"), &jsonSubObj)) {
-        jnumber_get_i32(jsonSubObj, &resumetype);
-
-        if (resumetype == 0 || resumetype == 1 || resumetype == 2) {
-            Notify_SuspendedStateChange(false);
-        }
     }
 
-    j_release(&parsedObj);
+    if (!sleepdResumeIsKernelWake(resumetype)) {
+        /*
+         * abort_suspend (2) or pwrevent_activity (1): the attempt did not
+         * happen, nothing changed for us. Debug only - on battery with the
+         * screen off these arrive every few seconds.
+         */
+        LS_LOG_DEBUG("sleepd resume type %d: suspend did not happen, nothing to do", resumetype);
+        return true;
+    }
+
+    LS_LOG_INFO("sleepd resume type %d: back from a kernel suspend\n", resumetype);
+    Notify_KernelResume();
 
     return true;
-
 }
 
 void ConnectionStateObserver::finalize(LSHandle *ConnHandle) {
@@ -232,12 +186,12 @@ void ConnectionStateObserver::Notify_TelephonyStateChange(bool TeleState) {
     LS_LOG_DEBUG("Notify_TelephonyStateChange\n");
 }
 
-void ConnectionStateObserver::Notify_SuspendedStateChange(bool SuspendState) {
+void ConnectionStateObserver::Notify_KernelResume() {
     std::for_each(m_listeners.begin(), m_listeners.end(),
            [ & ] (IConnectivityListener *l )  {
-                    l->Handle_SuspendedNotification(SuspendState);
+                    l->Handle_KernelResumeNotification();
                 });
-    LS_LOG_DEBUG("Notify_SuspendedStateChange = %d\n", SuspendState);
+    LS_LOG_DEBUG("Notify_KernelResume\n");
 }
 
 void ConnectionStateObserver::register_wifi_status(LSHandle *HandleConn) {

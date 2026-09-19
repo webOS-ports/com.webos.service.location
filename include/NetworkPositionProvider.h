@@ -127,7 +127,7 @@ public:
 
     void Handle_WifiInternetNotification(bool status);
 
-    void Handle_SuspendedNotification(bool status);
+    void Handle_KernelResumeNotification();
 
 private:
 

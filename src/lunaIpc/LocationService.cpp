@@ -153,7 +153,6 @@ LocationService::LocationService() :
         wifistate(false),
         isInternetConnectionAvailable(false),
         isTelephonyAvailable(false),
-        suspended_state(false),
         isWifiInternetAvailable(false),
         htPseudoGeofence(nullptr),
         mServiceHandle(nullptr),
@@ -417,8 +416,7 @@ bool LocationService::getNmeaData(LSHandle *sh, LSMessage *message, void *data) 
 
     LS_LOG_DEBUG("Call getNmeaData handler");
 
-    ret = ERROR_NONE;
-    if (suspended_state == false) {
+    {
         PositionRequest request("GPS", NMEA_CMD);
         ret = mGPSProvider->processRequest(request);
     }
@@ -1522,9 +1520,7 @@ bool LocationService::getGpsSatelliteData(LSHandle *sh, LSMessage *message, void
         goto EXIT;
     }
 
-    ret = ERROR_NONE;
-
-    if (suspended_state == false) {
+    {
         PositionRequest request("GPS", SATELITTE_CMD);
 
         ret = mGPSProvider->processRequest(request);
@@ -2223,7 +2219,7 @@ bool LocationService::getLocationUpdates(LSHandle *sh, LSMessage *message, void 
 
         /********Request gps Handler*****************************/
         if (startedHandlers & HANDLER_GPS_BIT) {
-            if (suspended_state == false) {
+            {
                 PositionRequest request("GPS", POSITION_CMD);
                 int requestError = mGPSProvider->processRequest(request);
                 /* Check for mock location*/

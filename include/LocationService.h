@@ -370,20 +370,21 @@ public:
         isTelephonyAvailable = state;
     }
 
-    void updateSuspendedState(bool state) {
-        LS_LOG_INFO("updateSuspendedState: suspended_state=%d, state=%d\n", suspended_state, state);
-
-        if(suspended_state == state) return;
-
-        if (state == true) {
-            LS_LOG_INFO("sleepd suspended\n");
-            stopGpsEngine();
-        } else {
-            LS_LOG_INFO("sleepd resume\n");
-            resumeGpsEngine();
-        }
-
-        suspended_state = state;
+    /*
+     * sleepd on LuneOS broadcasts "suspended" before every suspend attempt
+     * and a "resume" after each one, refused or not (see SleepdSignals.h);
+     * ConnectionStateObserver only forwards the kernel-typed resume, so this
+     * runs once per real wake. The GPS engine is no longer stopped ahead of
+     * an attempt: the attempt is often refused, and the stop/restart pair on
+     * every refusal was pointless churn. While a fix is being computed the
+     * GNSS stack holds its own wakelock, which is the proper veto. Re-issuing
+     * the active requests is a no-op when the engine kept running (the
+     * provider rejects duplicates) and restarts it if the sleep dropped the
+     * session.
+     */
+    void handleKernelResume() {
+        LS_LOG_INFO("sleepd resume after a kernel suspend: re-issuing active GPS requests\n");
+        resumeGpsEngine();
     }
 
     bool getTelephonyState() {
@@ -417,8 +418,8 @@ public:
         updateTelephonyState(Tele_state);
     }
 
-    void Handle_SuspendedNotification(bool Suspended_state) {
-        updateSuspendedState(Suspended_state);
+    void Handle_KernelResumeNotification() {
+        handleKernelResume();
     }
 
     void Handle_WifiInternetNotification(bool Internet_state) {
@@ -513,7 +514,6 @@ private:
     bool wifistate;
     bool isInternetConnectionAvailable;
     bool isTelephonyAvailable;
-    bool suspended_state;
     bool isWifiInternetAvailable;
     static LocationService *locService;
     static LSMethod rootMethod[];
