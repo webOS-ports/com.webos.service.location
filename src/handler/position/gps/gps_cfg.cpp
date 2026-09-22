@@ -56,9 +56,14 @@ void gps_set_config_entry(gps_param_s_type *config_entry, gps_param_v_type *conf
         if (strcmp(config_value->param_str_value, "NULL") == 0) {
           *((char *) config_entry->param_ptr) = '\0';
         } else {
+          /*
+           * The destinations are char[GPS_MAX_PARAM_STRING].  The old
+           * GPS_MAX_PARAM_STRING + 1 size let g_strlcpy write the terminator
+           * one byte past the field, into whatever struct member follows.
+           */
           (void)g_strlcpy((char *) config_entry->param_ptr,
                     config_value->param_str_value,
-                    GPS_MAX_PARAM_STRING + 1);
+                    GPS_MAX_PARAM_STRING);
         }
         /* Log INI values */
         LS_LOG_DEBUG("%s: PARAM %s = %s\n", __FUNCTION__, config_entry->param_name,

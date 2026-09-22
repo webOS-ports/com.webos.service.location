@@ -48,6 +48,12 @@ public:
     nyx_error_t injectExtraCommand(char* command);
     nyx_error_t updateNetworkAvailablity(NetworkInfo *networkInfo);
     nyx_error_t deleteAidingData();
+    /*
+     * Diagnostics straight from the GNSS engine. dest must be at least
+     * NYX_GPS_DEBUG_DATA_MAXLEN bytes; the module answers
+     * NYX_ERROR_NOT_IMPLEMENTED where the HAL exposes no IGnssDebug.
+     */
+    nyx_error_t getDebugData(char *dest, size_t destLen);
 
 
     //geofence
@@ -65,9 +71,11 @@ public:
     static void gpsNmeaCb(int64_t timestamp, const char* nmea, int length, void *user_data);
     static void gpsRequestUtcTimeCb(void *user_data);
     static void gpsXtraDownloadRequestCb(void *user_data);
-    static void xtraTimeCb(int64_t utcTime, int64_t timeReference, int uncertainty);
-    static void xtraDataCb(char *data, int length);
-    static void xtraDataDownloadThread(void *arg);
+    static void nfwNotifyCb(nyx_gps_nfw_notification_t *notification, void *user_data);
+    void injectSystemTime();
+    static void xtraTimeCb(int64_t utcTime, int64_t timeReference, int uncertainty, void *user_data);
+    static void xtraDataCb(char *data, int length, void *user_data);
+    static gpointer xtraDataDownloadThread(gpointer arg);
     static void geofenceResumeCb(int32_t geofence_id, int32_t status, void *user_data);
     static void geofencePauseCb(int32_t geofence_id, int32_t status, void *user_data);
     static void geofenceRemoveCb(int32_t geofence_id, int32_t status, void *user_data);
@@ -86,6 +94,7 @@ private:
     DownloadStateEType mDownloadNtpDataStatus ;
 public:
     virtual void onRequestCompleted(NtpErrors error, const NTPData *data);
+    nyx_gps_nfw_callbacks_t mNfwCallbacks;
     nyx_device_handle_t mNyxGpsSystem;
     nyx_gps_callbacks_t mGPSCallbacks;
     nyx_gps_location_t mPosition;

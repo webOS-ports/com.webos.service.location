@@ -18,6 +18,8 @@
 #ifndef LOCATION_ERRORS_H_
 #define LOCATION_ERRORS_H_
 
+#include <stdint.h>
+
 /*
  * Common Error codes of Location Framework
  */

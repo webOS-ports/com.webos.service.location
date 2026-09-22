@@ -15,7 +15,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
-cmake_minimum_required(VERSION 2.8.7)
+cmake_minimum_required(VERSION 3.10)
 project(location)
 
 include(webOS/webOS)
@@ -60,9 +60,46 @@ pkg_check_modules(NYXLIB REQUIRED nyx)
 add_definitions(${NYXLIB_CFLAGS})
 #include_directories(${NYXLIB_INCLUDE_DIRS})
 #webos_add_compiler_flags(ALL ${NYXLIB_CFLAGS_OTHER})
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+# Diagnostics.  The service parses attacker-reachable JSON and consumes data
+# from the GNSS HAL, so the buffer/format/bounds warnings below are treated as
+# part of the build contract rather than as advice.  -Wformat-security in
+# particular has to stay on: the recipe used to disable it (SECURITY_STRINGFORMAT)
+# because of non-literal format strings that have since been removed.
+set(LOCATION_WARNING_FLAGS
+    -Wall
+    -Wextra
+    -Wformat=2
+    -Wformat-security
+    -Wformat-overflow=2
+    -Wstringop-overflow=4
+    -Wstringop-truncation
+    -Warray-bounds=2
+    -Wvla
+    -Wuninitialized
+    -Wmaybe-uninitialized
+    -Wreturn-type
+    -Wshadow=local
+    -Wpointer-arith
+    -Wno-unused-parameter
+    # glib's LSMethod/GSimpleAsyncResult usage produces unavoidable noise here.
+    -Wno-missing-field-initializers
+    -Wno-psabi
+)
+string(REPLACE ";" " " LOCATION_WARNING_FLAGS_STR "${LOCATION_WARNING_FLAGS}")
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${LOCATION_WARNING_FLAGS_STR}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LOCATION_WARNING_FLAGS_STR}")
+
+# Opt-in: -DLOCATION_WERROR=ON in CI so regressions in the above are build breaks.
+option(LOCATION_WERROR "Treat compiler warnings as errors" OFF)
+if(LOCATION_WERROR)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+endif()
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories("${PROJECT_SOURCE_DIR}/include")
 
@@ -123,6 +160,36 @@ target_link_libraries(${LOCATION_SERVICE_NAME} ${LIBRARIES})
 webos_build_program(NAME ${LOCATION_SERVICE_NAME})
 webos_build_system_bus_files()
 
+
+# Host/target-runnable unit tests: -DLOCATION_BUILD_TESTS=ON, then ctest.
+option(LOCATION_BUILD_TESTS "Build the unit tests" OFF)
+if(LOCATION_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(test_db_util
+        tests/test_db_util.cpp
+        src/utils/db_util.cpp
+        src/utils/Gps_stored_data.cpp)
+    target_link_libraries(test_db_util ${GLIB2_LDFLAGS} ${LIB2XML_LDFLAGS})
+    add_test(NAME db_util COMMAND test_db_util)
+
+    add_executable(test_gps_cfg
+        tests/test_gps_cfg.cpp
+        tests/test_support.cpp
+        src/handler/position/gps/gps_cfg.cpp)
+    target_link_libraries(test_gps_cfg ${GLIB2_LDFLAGS} ${PMLOGLIB_LDFLAGS} ${LOCUTILS_LDFLAGS})
+    add_test(NAME gps_cfg COMMAND test_gps_cfg)
+
+    add_executable(test_ntp_packet tests/test_ntp_packet.cpp)
+    target_link_libraries(test_ntp_packet ${GLIB2_LDFLAGS})
+    add_test(NAME ntp_packet COMMAND test_ntp_packet)
+
+    add_executable(test_sleepd_signals
+        tests/test_sleepd_signals.cpp
+        src/lunaIpc/SleepdSignals.cpp)
+    target_link_libraries(test_sleepd_signals ${GLIB2_LDFLAGS} ${LIBPBNJSON_LDFLAGS})
+    add_test(NAME sleepd_signals COMMAND test_sleepd_signals)
+endif()
 
 install(DIRECTORY include/
         DESTINATION ${CMAKE_INSTALL_PREFIX}/include/location

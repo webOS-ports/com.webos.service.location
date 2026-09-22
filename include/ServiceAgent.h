@@ -26,6 +26,7 @@
  * Key values used to store Luna subscription list
  */
 #define SUBSC_GPS_GET_NMEA_KEY "getNmeaData"
+#define SUBSC_GET_NFW_KEY "getNfwNotifications"
 #define SUBSC_SEND_XTRA_CMD_KEY "sendExtraCommand"
 #define SUBSC_GET_TTFF_KEY "getTimeToFirstFix"
 #define SUBSC_GET_GPS_SATELLITE_DATA "getGpsSatelliteData"
@@ -118,7 +119,7 @@ enum RequestState {
 };
 
 // Mapped with HandlerTypes
-enum HanlderRequestType {
+enum HandlerType {
     HANDLER_HYBRID_BIT = (1u << HANDLER_HYBRID),
     HANDLER_GPS_BIT = (1u << HANDLER_GPS),
     HANDLER_NETWORK_BIT = (1u << HANDLER_NETWORK)

@@ -53,7 +53,7 @@ using namespace std;
 #define printf_info LS_LOG_INFO
 #define printf_warning LS_LOG_WARNING
 
-#define GPS_CONF_FILE    "/etc/gps.conf"
+#define GPS_CONF_FILE    "/etc/location/gpsConfig.conf"
 
 #define GPS_UPDATE_INTERVAL_MAX     12*60
 
@@ -248,6 +248,7 @@ public:
     GPSStatus getGPSStatus();
 
     long long getTimeToFirstFixValue ();
+    nyx_error_t getDebugData(char *dest, size_t destLen);
 private:
     GPSPositionProvider();
 

@@ -62,6 +62,27 @@ typedef enum {
 int createPreference(const char *filename, DBHandle *handle, const char *title, int enablecheck);
 
 /**
+ * <Funciton>       openPreference
+ * <Description>    Parse an existing preference file into the handle once, so a
+ *                  caller reading several keys pays for one parse rather than
+ *                  one per key, and so no existence check has to race the read.
+ *                  The handle owns the document until closePreference().
+ * @param           <filename> <In> <name of the file to read>
+ * @param           <DBHandle> <In> <handle to populate>
+ * @return          int SUCCESS, NULL_VALUE or IO_ERROR
+ */
+int openPreference(const char *filename, DBHandle *handle);
+
+/**
+ * <Funciton>       closePreference
+ * <Description>    Release the document held by the handle.  Safe on a handle
+ *                  that holds none; leaves handle->doc NULL either way.
+ * @param           <DBHandle> <In> <handle to release>
+ * @return          void
+ */
+void closePreference(DBHandle *handle);
+
+/**
  * <Funciton>       put
  * <Description>    Get the position from GPS
  * @param           <DBHandle> <In> <DBHandled intialized in create>
@@ -69,7 +90,7 @@ int createPreference(const char *filename, DBHandle *handle, const char *title, 
  * @param           <value> <In> <value will be mapped with the given key>
  * @return          int
  */
-int put(DBHandle *handle, const char *key, char *value);
+int put(DBHandle *handle, const char *key, const char *value);
 
 /**
  * <Funciton>       get
@@ -88,7 +109,7 @@ int get(DBHandle *handle, const char *key, xmlChar **result);
  * @param           <key> <In> <key to delete>
  * @return          int
  */
-int deleteKey(DBHandle *handle, char *key);
+int deleteKey(DBHandle *handle, const char *key);
 
 /**
  * <Funciton>       commit
@@ -112,7 +133,7 @@ int isFileExists(const char *fname);
  * @param           <filename> <In> <file name to delete>
  * @return          int
  */
-int deletePreference(char *filename);
+int deletePreference(const char *filename);
 
 
 

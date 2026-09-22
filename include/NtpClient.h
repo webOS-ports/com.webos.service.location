@@ -19,28 +19,36 @@
 #define LOCATION_NTPCLIENT_H
 
 #include <stdint.h>
+#include <glib.h>
 #include <GPSServiceConfig.h>
 
 
 typedef int64_t ntpTime;
 typedef int64_t ntpReferenceTime;
 
+/*
+ * SNTP wire format (RFC 4330): every word is exactly 32 bits.  These fields
+ * were declared unsigned long, which is 8 bytes on aarch64/x86-64, so on every
+ * 64-bit target the request packet was 104 bytes instead of 48 and the reply's
+ * transmit timestamp was read from the wrong offset.  Only armv7 ever computed
+ * a correct NTP time.
+ */
 struct ntp_packet {
-    unsigned char modeVNli;
-    unsigned char stratum;
-    char poll;
-    char precision;
-    unsigned long rootDelay;
-    unsigned long rootDispersion;
-    unsigned long referenceIdentifier;
-    unsigned long referenceTimeStampSecs;
-    unsigned long referenceTimeStampFreq;
-    unsigned long originateTimeStampSecs;
-    unsigned long originateTimeStampFreq;
-    unsigned long receiveTimeStampSeqs;
-    unsigned long receiveTimeStampFreq;
-    unsigned long transmitTimeStampSecs;
-    unsigned long transmitTimeStampFreq;
+    uint8_t modeVNli;
+    uint8_t stratum;
+    int8_t poll;
+    int8_t precision;
+    uint32_t rootDelay;
+    uint32_t rootDispersion;
+    uint32_t referenceIdentifier;
+    uint32_t referenceTimeStampSecs;
+    uint32_t referenceTimeStampFreq;
+    uint32_t originateTimeStampSecs;
+    uint32_t originateTimeStampFreq;
+    uint32_t receiveTimeStampSeqs;
+    uint32_t receiveTimeStampFreq;
+    uint32_t transmitTimeStampSecs;
+    uint32_t transmitTimeStampFreq;
 };
 
 typedef enum {
@@ -126,7 +134,7 @@ public:
     }
 
 private:
-    static void ntpDownloadThread(void *arg);
+    static gpointer ntpDownloadThread(gpointer arg);
 
     int64_t static getElapsedRealtime();
 };

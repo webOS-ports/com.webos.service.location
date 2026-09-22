@@ -111,6 +111,11 @@ typedef struct _NmeaData {
     LSHandle *lsHandle;
 } NmeaData;
 
+typedef struct _NfwData {
+    char *nfwString;
+    LSHandle *lsHandle;
+} NfwData;
+
 typedef struct _SatelliteData {
     char *satelliteString;
     LSHandle *lsHandle;
@@ -155,10 +160,21 @@ public:
             m_sh = sh;
             m_handlerType = handlerType;
             timerStart = true;
+            /*
+             * MIN(MAX, ...) did not mean what it reads as: MAX is glib's
+             * two-argument macro, so with no argument list it fell through to
+             * the only MAX in scope - FeatureType::MAX, the geocoding
+             * feature-type enumerator, whose value is 6.  Every subscription
+             * key was therefore truncated to six bytes and, because six is
+             * shorter than any real key, left unterminated: "gps/getLocationU-
+             * pdate" became "gps/ge" followed by whatever was on the stack.
+             * getKey() hands that to LSSubscriptionAcquire, so the timeout path
+             * looked up a garbage key and read past the buffer doing it.
+             */
+            memset(key, 0x00, sizeof(key));
+
             if (argkey != NULL)
-                memcpy(key, argkey, MIN(MAX,strlen(argkey) + 1));
-            else
-                memset(key, 0x00, KEY_MAX);
+                g_strlcpy(key, argkey, sizeof(key));
         }
 
         LSHandle *GetHandle() const {
@@ -278,8 +294,10 @@ public:
     // /**Callback called from Handlers********/
 
     static void sendNmeaData(GObject *source, GAsyncResult *res, gpointer userdata);
+    static void sendNfwNotification(GObject *source, GAsyncResult *res, gpointer userdata);
 
     static void nmeaDataUnref(gpointer data);
+    static void nfwDataUnref(gpointer data);
 
     static void sendSatelliteData(GObject *source, GAsyncResult *res, gpointer userdata);
 
@@ -352,20 +370,21 @@ public:
         isTelephonyAvailable = state;
     }
 
-    void updateSuspendedState(bool state) {
-        LS_LOG_INFO("updateSuspendedState: suspended_state=%d, state=%d\n", suspended_state, state);
-
-        if(suspended_state == state) return;
-
-        if (state == true) {
-            LS_LOG_INFO("sleepd suspended\n");
-            stopGpsEngine();
-        } else {
-            LS_LOG_INFO("sleepd resume\n");
-            resumeGpsEngine();
-        }
-
-        suspended_state = state;
+    /*
+     * sleepd on LuneOS broadcasts "suspended" before every suspend attempt
+     * and a "resume" after each one, refused or not (see SleepdSignals.h);
+     * ConnectionStateObserver only forwards the kernel-typed resume, so this
+     * runs once per real wake. The GPS engine is no longer stopped ahead of
+     * an attempt: the attempt is often refused, and the stop/restart pair on
+     * every refusal was pointless churn. While a fix is being computed the
+     * GNSS stack holds its own wakelock, which is the proper veto. Re-issuing
+     * the active requests is a no-op when the engine kept running (the
+     * provider rejects duplicates) and restarts it if the sleep dropped the
+     * session.
+     */
+    void handleKernelResume() {
+        LS_LOG_INFO("sleepd resume after a kernel suspend: re-issuing active GPS requests\n");
+        resumeGpsEngine();
     }
 
     bool getTelephonyState() {
@@ -399,8 +418,8 @@ public:
         updateTelephonyState(Tele_state);
     }
 
-    void Handle_SuspendedNotification(bool Suspended_state) {
-        updateSuspendedState(Suspended_state);
+    void Handle_KernelResumeNotification() {
+        handleKernelResume();
     }
 
     void Handle_WifiInternetNotification(bool Internet_state) {
@@ -477,6 +496,7 @@ public:
 public:
     void getLocationUpdateCb(GeoLocation& location, ErrorCodes errCode,HandlerTypes type);
     void getNmeaDataCb(long long timestamp, char *data, int length);
+    void nfwNotifyCb(nyx_gps_nfw_notification_t *notification);
     void getGpsStatusCb(int state);
     void getGpsSatelliteDataCb(Satellite *);
     void geofenceAddCb(int32_t geofence_id, int32_t status, gpointer user_data);
@@ -494,7 +514,6 @@ private:
     bool wifistate;
     bool isInternetConnectionAvailable;
     bool isTelephonyAvailable;
-    bool suspended_state;
     bool isWifiInternetAvailable;
     static LocationService *locService;
     static LSMethod rootMethod[];
@@ -503,6 +522,8 @@ private:
     static LSMethod mockPublicMethod[];
     static LSMethod mockPrivateMethod[];
     bool is_geofenceId_used[MAX_GEOFENCE_ID];
+    static bool buildGetStateSubscriptionKey(char *dest, size_t destLen, const char *handler);
+    bool geofenceSlot(int geofenceId, int *slot);
     GHashTable *htPseudoGeofence;
     LSHandle *mServiceHandle;
 
@@ -541,6 +562,8 @@ private:
     LOCATION_SERVICE_METHOD(getLocationHandlerDetails);
     LOCATION_SERVICE_METHOD(getGpsSatelliteData);
     LOCATION_SERVICE_METHOD(getTimeToFirstFix);
+    LOCATION_SERVICE_METHOD(getGpsDebugData);
+    LOCATION_SERVICE_METHOD(getNfwNotifications);
     LOCATION_SERVICE_METHOD(getLocationUpdates);
     LOCATION_SERVICE_METHOD(getCachedPosition);
     LOCATION_SERVICE_METHOD(cancelSubscription);

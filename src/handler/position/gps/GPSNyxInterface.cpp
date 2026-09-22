@@ -15,6 +15,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
+#include <sys/time.h>
+#include <time.h>
 #include <GPSPositionProvider.h>
 #include <MockLocation.h>
 
@@ -73,31 +75,50 @@ nyx_error_t GPSNyxInterface::initialize(void *instance) {
         printf_debug("GPSPositionProvider exit\n");
         return rc;
     }
+    /*
+     * Non-framework location notifications. Registered separately from
+     * nyx_gps_init because they are not part of the GNSS position flow: they
+     * report that something outside the platform asked where we are. Absent on
+     * any HAL without IGnssVisibilityControl, which is every 1.x one, so
+     * NYX_ERROR_NOT_IMPLEMENTED is an ordinary answer and not a failure.
+     */
+    memset(&mNfwCallbacks, 0, sizeof(nyx_gps_nfw_callbacks_t));
+    mNfwCallbacks.user_data = this;
+    mNfwCallbacks.nfw_notify_cb = nfwNotifyCb;
+
+    if (NYX_ERROR_NONE != nyx_gps_set_nfw_callback(mNyxGpsSystem, &mNfwCallbacks))
+        printf_info("non-framework location notifications unavailable\n");
+
     if (strcmp(gpsInstance->mGPSConf.mChipsetID, "Qcom") == 0) {
         mXtraClientCallbacks.user_data = this;
-        mXtraClientCallbacks.xtra_client_data_cb =
-                (nyx_gps_xtra_client_data_callback) (xtraDataCb);
-        mXtraClientCallbacks.xtra_client_time_cb =
-                (nyx_gps_xtra_client_time_callback) (xtraTimeCb);
+        /*
+         * No function-pointer casts: calling through a pointer of a different
+         * type is undefined behaviour, and the casts were hiding that these
+         * callbacks silently ignored their user_data parameter.
+         */
+        mXtraClientCallbacks.xtra_client_data_cb = xtraDataCb;
+        mXtraClientCallbacks.xtra_client_time_cb = xtraTimeCb;
 
+        /* g_strlcpy: strncpy leaves the copy unterminated when the source
+         * fills the field, and these urls come from a user-editable conf. */
         count = 0;
-        strncpy(mXtraConfig.xtra_server_url[count++],
+        g_strlcpy(mXtraConfig.xtra_server_url[count++],
                gpsInstance->mGPSConf.mXtraServer1, sizeof(mXtraConfig.xtra_server_url[0]));
-        strncpy(mXtraConfig.xtra_server_url[count++],
+        g_strlcpy(mXtraConfig.xtra_server_url[count++],
                gpsInstance->mGPSConf.mXtraServer2, sizeof(mXtraConfig.xtra_server_url[0]));
-        strncpy(mXtraConfig.xtra_server_url[count++],
+        g_strlcpy(mXtraConfig.xtra_server_url[count++],
                gpsInstance->mGPSConf.mXtraServer3, sizeof(mXtraConfig.xtra_server_url[0]));
 
         count = 0;
-        strncpy(mXtraConfig.sntp_server_url[count++],
+        g_strlcpy(mXtraConfig.sntp_server_url[count++],
                gpsInstance->mGPSConf.mNTPServer1, sizeof(mXtraConfig.sntp_server_url[0]));
-        strncpy(mXtraConfig.sntp_server_url[count++],
+        g_strlcpy(mXtraConfig.sntp_server_url[count++],
                gpsInstance->mGPSConf.mNTPServer2, sizeof(mXtraConfig.sntp_server_url[0]));
-        strncpy(mXtraConfig.sntp_server_url[count++],
+        g_strlcpy(mXtraConfig.sntp_server_url[count++],
                gpsInstance->mGPSConf.mNTPServer3, sizeof(mXtraConfig.sntp_server_url[0]));
 
         // test need to decide on UA string
-        strncpy(mXtraConfig.user_agent_string,
+        g_strlcpy(mXtraConfig.user_agent_string,
                "LE/1.2.3/OEM/Model/Board/Carrier", sizeof(mXtraConfig.user_agent_string));
 
         rc = nyx_gps_init_xtra_client(mNyxGpsSystem, &mXtraConfig,
@@ -120,6 +141,18 @@ void GPSNyxInterface::deInitialize() {
 }
 
 nyx_error_t GPSNyxInterface::startGPS() {
+    /*
+     * Give the engine a time estimate before starting it.
+     *
+     * This cannot wait for gpsRequestUtcTimeCb: that is only called by a HAL
+     * advertising ON_DEMAND_TIME, and neither device tested here does - sargo
+     * reports capabilities 99 and mindphone 1991, and bit 0x10 is clear in
+     * both. So nothing ever asked, nothing was ever injected, and getGpsDebugData
+     * showed both engines still holding their 2017 build-default time estimate
+     * while doing a full cold search on every fix attempt.
+     */
+    injectSystemTime();
+
     return nyx_gps_start(mNyxGpsSystem);
 }
 
@@ -179,6 +212,13 @@ nyx_error_t GPSNyxInterface::updateNetworkAvailablity(
         NetworkInfo *networkInfo) {
     return nyx_gps_update_network_availability(mNyxGpsSystem,
                                                networkInfo->available, networkInfo->apn.c_str());
+}
+
+nyx_error_t GPSNyxInterface::getDebugData(char *dest, size_t destLen) {
+    if (nullptr == mNyxGpsSystem || nullptr == dest || 0 == destLen)
+        return NYX_ERROR_INVALID_VALUE;
+
+    return nyx_gps_get_debug_data(mNyxGpsSystem, dest, destLen);
 }
 
 nyx_error_t GPSNyxInterface::deleteAidingData() {
@@ -362,13 +402,28 @@ void GPSNyxInterface::gpsSvStatusCb(nyx_gps_sv_status_t *sat_data, void *user_da
 
     {
         int index = DEFAULT_VALUE;
+        int num_svs = sat_data->num_svs;
         Satellite *sat = NULL;
-        sat = satellite_create(sat_data->num_svs);
 
-        sat->visible_satellites_count = sat_data->num_svs;
-        LS_LOG_DEBUG(" number of satellite %d : \n", sat_data->num_svs);
+        /*
+         * num_svs comes from the GNSS HAL and indexes the fixed-size sv_list
+         * array; a misbehaving HAL must not walk us past it.
+         */
+        if (num_svs < 0)
+            num_svs = 0;
+        else if (num_svs > NYX_GPS_MAX_SVS)
+            num_svs = NYX_GPS_MAX_SVS;
 
-        for (index = DEFAULT_VALUE; index < sat_data->num_svs; index++) {
+        sat = satellite_create(num_svs);
+
+        if (!sat) {
+            printf_warning("failed to allocate satellite data\n");
+            return;
+        }
+
+        LS_LOG_DEBUG(" number of satellite %d : \n", num_svs);
+
+        for (index = DEFAULT_VALUE; index < num_svs; index++) {
             bool used = FALSE;
             bool hasephemeris = FALSE;
             bool hasalmanac = FALSE;
@@ -378,25 +433,48 @@ void GPSNyxInterface::gpsSvStatusCb(nyx_gps_sv_status_t *sat_data, void *user_da
             gdouble elev = (gdouble)sat_data->sv_list[index].elevation;
             gdouble azim = (gdouble)sat_data->sv_list[index].azimuth;
 
-            ((sat_data->used_in_fix_mask & (1 << (prn - 1)))) == DEFAULT_VALUE ?
-                    (used = FALSE) : (used = TRUE);
-            ((sat_data->ephemeris_mask & (1 << (prn - 1)))) == DEFAULT_VALUE ?
-                    (hasephemeris = FALSE) : (hasephemeris = TRUE);
-            ((sat_data->almanac_mask & (1 << (prn - 1)))) == DEFAULT_VALUE ?
-                    (hasalmanac = FALSE) : (hasalmanac = TRUE);
+            /*
+             * The per-satellite masks are 32 bits wide and indexed by PRN;
+             * shifting by prn-1 for a PRN outside [1, 32] (GLONASS/BeiDou ids
+             * go far higher) was undefined behaviour.  Satellites beyond the
+             * mask's reach simply report no flags.
+             */
+            if (prn >= 1 && prn <= 32) {
+                guint32 bit = 1u << (prn - 1);
+
+                used = (sat_data->used_in_fix_mask & bit) ? TRUE : FALSE;
+                hasephemeris = (sat_data->ephemeris_mask & bit) ? TRUE : FALSE;
+                hasalmanac = (sat_data->almanac_mask & bit) ? TRUE : FALSE;
+            }
 
             set_satellite_details(sat, index, snr, prn, elev, azim, used,
                     hasalmanac, hasephemeris);
         }
 
         //call satellite cb
-        if (sat_data->num_svs > DEFAULT_VALUE) {
+        if (num_svs > DEFAULT_VALUE) {
             if (providerInstance->mAPIProgressFlag & SATELLITE_GET_DATA_ON)
                 providerInstance->getCallback()->getGpsSatelliteDataCb(sat);
         }
 
         satellite_free(sat);
     }
+}
+
+void GPSNyxInterface::nfwNotifyCb(nyx_gps_nfw_notification_t *notification,
+                                  void *user_data) {
+    GPSNyxInterface *self = (GPSNyxInterface *) user_data;
+
+    if (nullptr == notification || nullptr == self)
+        return;
+
+    GPSPositionProvider *providerInstance =
+            (GPSPositionProvider *) self->gpsProviderInstance;
+
+    if (nullptr == providerInstance || nullptr == providerInstance->getCallback())
+        return;
+
+    providerInstance->getCallback()->nfwNotifyCb(notification);
 }
 
 void GPSNyxInterface::gpsNmeaCb(int64_t timestamp, const char *nmea, int length, void *user_data) {
@@ -437,11 +515,69 @@ void GPSNyxInterface::gpsReleaseWakelockCb(void *user_data) {
     printf_debug("enter gpsReleaseWakelockCb\n");
 }
 
+/*
+ * Time older than this is taken to mean the clock has never been set, and is
+ * not worth injecting - a wrong time is worse for the engine than none.
+ * 2020-01-01 00:00:00 UTC.
+ */
+#define GPS_PLAUSIBLE_TIME_MS 1577836800000LL
+
+/*
+ * How far off the system clock might be. NTP-synced it is milliseconds; freshly
+ * restored from the RTC it can be seconds. Claim a second so the engine treats
+ * it as coarse aiding rather than as a precise reference.
+ */
+#define GPS_SYSTEM_TIME_UNCERTAINTY_MS 1000
+
+void GPSNyxInterface::injectSystemTime() {
+    struct timeval tv;
+    struct timespec ts;
+    int64_t utcTime;
+    int64_t timeReference = 0;
+
+    if (0 != gettimeofday(&tv, nullptr))
+        return;
+
+    utcTime = (int64_t) tv.tv_sec * 1000LL + tv.tv_usec / 1000;
+
+    if (utcTime < GPS_PLAUSIBLE_TIME_MS) {
+        printf_warning("system clock not set, not injecting time\n");
+        return;
+    }
+
+    /*
+     * timeReference is the monotonic timestamp at which utcTime was read, so
+     * the engine can age the estimate. CLOCK_BOOTTIME matches what Android
+     * passes here because it keeps counting across suspend.
+     */
+    if (0 == clock_gettime(CLOCK_BOOTTIME, &ts))
+        timeReference = (int64_t) ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+
+    if (NYX_ERROR_NONE != injectExtraTime(utcTime, timeReference,
+                                          GPS_SYSTEM_TIME_UNCERTAINTY_MS))
+        printf_warning("failed to inject system time\n");
+    else
+        printf_info("injected system time %lld as coarse aiding\n",
+                    (long long) utcTime);
+}
+
 void GPSNyxInterface::gpsRequestUtcTimeCb(void *user_data) {
     GPSNyxInterface *gpsNyxInterface = (GPSNyxInterface *) user_data;
     GPSPositionProvider *providerInstance =
             (GPSPositionProvider *) gpsNyxInterface->gpsProviderInstance;
     printf_debug("enter gpsRequestUtcTimeCb\n");
+
+    /*
+     * Answer immediately from the system clock. The engine asked because it has
+     * no time of its own, and without one it cannot do anything but a full cold
+     * search - the debug data shows it sitting at its 2017 build default. The
+     * NTP paths below refine this, but neither is available everywhere: the
+     * built-in client is only set up when the XTRA client fails to initialise,
+     * and nyx_gps_download_ntp_time needs a module that implements it, which
+     * the hybris GPS module does not. Before this, that combination meant no
+     * time was ever injected at all.
+     */
+    gpsNyxInterface->injectSystemTime();
 
     if (DOWNLOADING == gpsNyxInterface->mDownloadNtpDataStatus)
         return;
@@ -469,7 +605,7 @@ void GPSNyxInterface::gpsXtraDownloadRequestCb(void *user_data) {
         return;
 
     if (gpsNyxInterface->mXtraDefault) {
-	    GThread *downloadThread = g_thread_new("download xtra", (GThreadFunc)xtraDataDownloadThread, user_data);
+	    GThread *downloadThread = g_thread_new("download xtra", xtraDataDownloadThread, user_data);
 	    if (!downloadThread) {
 		    printf_warning("failed to create xtra download thread\n");
 	    }
@@ -649,15 +785,20 @@ void GPSNyxInterface::geofenceResumeCb(int32_t geofenceId, int32_t status,void *
     printf_debug("geofenceResumeCb emitting\n");
 }
 
-void GPSNyxInterface::xtraDataCb(char *data, int length) {
+void GPSNyxInterface::xtraDataCb(char *data, int length, void *user_data) {
     GPSPositionProvider *gpsService = GPSPositionProvider::getInstance();
 
     printf_debug("enter xtraDataCb\n");
 
     pthread_mutex_lock(&gpsService->mGPSThreadMutex);
-    
-    if(data != nullptr) {
-    	gpsService->mXtraData.data = data;
+
+    /*
+     * Xtra assistance data is binary.  Assigning the bare pointer scanned for
+     * a NUL, which both truncated the blob at the first zero byte and read
+     * past its end when it contained none.  Copy exactly length bytes.
+     */
+    if (data != nullptr && length > 0) {
+        gpsService->mXtraData.data.assign(data, (size_t) length);
     }
 
     gpsService->mGPSThreadAction = ACTION_XTRA_DATA;
@@ -669,7 +810,7 @@ void GPSNyxInterface::xtraDataCb(char *data, int length) {
 }
 
 void GPSNyxInterface::xtraTimeCb(int64_t utcTime, int64_t timeReference,
-                                 int uncertainty) {
+                                 int uncertainty, void *user_data) {
     GPSPositionProvider *gpsService = GPSPositionProvider::getInstance();
 
     printf_debug("enter xtraTimeCb\n");
@@ -687,11 +828,10 @@ void GPSNyxInterface::xtraTimeCb(int64_t utcTime, int64_t timeReference,
     pthread_mutex_unlock(&gpsService->mGPSThreadMutex);
 }
 
-void GPSNyxInterface::xtraDataDownloadThread(void *arg) {
+gpointer GPSNyxInterface::xtraDataDownloadThread(gpointer arg) {
     int nextserverindex = 0;
-    int noofservers = 3;
     int count = 0;
-    char *xtraservers[noofservers];
+    char *xtraservers[3];
     const char *ACCEPT =
             "Accept:, application/vnd.wap.mms-message, application/vnd.wap.sic";
     const char *XWAP_PROFILE =
@@ -758,6 +898,7 @@ void GPSNyxInterface::xtraDataDownloadThread(void *arg) {
     }
 
     providerInstance->mDownloadXtraDataStatus = IDLE;
+    return nullptr;
 }
 
 void GPSNyxInterface::onRequestCompleted(NtpErrors error, const NTPData *data) {

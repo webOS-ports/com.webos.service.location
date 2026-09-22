@@ -18,6 +18,7 @@
 #include <nyx/common/nyx_gps_common.h>
 #include <gps_cfg.h>
 #include <string.h>
+#include <glib.h>
 #include <GPSServiceConfig.h>
 
 using namespace std;
@@ -38,19 +39,19 @@ using namespace std;
 
 void GPSServiceConfig::loadDefaults() {
     mSUPLVer = SUPL_VERSION;
-    strncpy(mSUPLHost, SUPL_HOST, sizeof(mSUPLHost));
+    g_strlcpy(mSUPLHost, SUPL_HOST, sizeof(mSUPLHost));
     mSUPLPort = SUPL_PORT;
 
-    strncpy(mXtraServer1, XTRASERVER1, sizeof(mXtraServer1));
-    strncpy(mXtraServer2, XTRASERVER2, sizeof(mXtraServer2));
-    strncpy(mXtraServer3, XTRASERVER3, sizeof(mXtraServer3));
-    strncpy(mNTPServer1, NTPSERVER1, sizeof(mNTPServer1));
-    strncpy(mNTPServer2, NTPSERVER2, sizeof(mNTPServer2));
-    strncpy(mNTPServer3, NTPSERVER3, sizeof(mNTPServer3));
-    strncpy(mVENDOR, VENDOR, sizeof(mVENDOR));
+    g_strlcpy(mXtraServer1, XTRASERVER1, sizeof(mXtraServer1));
+    g_strlcpy(mXtraServer2, XTRASERVER2, sizeof(mXtraServer2));
+    g_strlcpy(mXtraServer3, XTRASERVER3, sizeof(mXtraServer3));
+    g_strlcpy(mNTPServer1, NTPSERVER1, sizeof(mNTPServer1));
+    g_strlcpy(mNTPServer2, NTPSERVER2, sizeof(mNTPServer2));
+    g_strlcpy(mNTPServer3, NTPSERVER3, sizeof(mNTPServer3));
+    g_strlcpy(mVENDOR, VENDOR, sizeof(mVENDOR));
     mLgeTlsMode = LGETLSMODE;
     mLgeGPSPositionMode = LGEPOSITIONMODE;
-    strncpy(mChipsetID, CHIPSETID, sizeof(mChipsetID));
+    g_strlcpy(mChipsetID, CHIPSETID, sizeof(mChipsetID));
 
 
 }
