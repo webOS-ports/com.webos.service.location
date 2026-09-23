@@ -7,7 +7,7 @@
         {
             "service":"com.webos.service.location",
             "inbound":["*"],
-            "outbound":["com.webos.service.telephony", "com.webos.service.wifi", "com.webos.service.wan", "com.webos.service.connectionmanager", "com.webos.settingsservice", "com.webos.lunasend-*", "com.webos.monitor*", "com.palm.display"]
+            "outbound":["com.webos.service.telephony", "com.webos.service.wifi", "com.webos.service.wan", "com.webos.service.connectionmanager", "com.webos.settingsservice", "com.webos.lunasend-*", "com.webos.monitor*", "com.palm.display", "com.webos.service.bus", "com.webos.service.sleep", "com.webos.service.power"]
         }
     ]
 }
