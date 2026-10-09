@@ -189,6 +189,20 @@ if(LOCATION_BUILD_TESTS)
         src/lunaIpc/SleepdSignals.cpp)
     target_link_libraries(test_sleepd_signals ${GLIB2_LDFLAGS} ${LIBPBNJSON_LDFLAGS})
     add_test(NAME sleepd_signals COMMAND test_sleepd_signals)
+
+    add_executable(test_network_position
+        tests/test_network_position.cpp
+        tests/test_support.cpp
+        src/handler/position/network/NetworkPositionProvider.cpp
+        src/handler/position/network/NetworkData.cpp
+        src/utils/NetworkRequestManager.cpp
+        src/utils/GeoLocation.cpp
+        src/utils/Gps_stored_data.cpp
+        src/utils/db_util.cpp
+        src/mock/MockLocation.c
+        src/mock/NetworkMockLocation.c)
+    target_link_libraries(test_network_position ${LIBRARIES})
+    add_test(NAME network_position COMMAND test_network_position)
 endif()
 
 install(DIRECTORY include/

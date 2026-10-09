@@ -177,6 +177,10 @@ private:
     bool parseCellData(T& jsonObj);
 
 private:
+    // tests/test_network_position.cpp drives processRequest() and
+    // handleResponse() with the provider in states only a running service
+    // reaches.
+    friend class NetworkPositionProviderTest;
 
     NetworkData mNetworkData;
     _NetworkPositionData mPositionData;
