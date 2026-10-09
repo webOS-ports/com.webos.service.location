@@ -235,7 +235,11 @@ ErrorCodes  NetworkPositionProvider::processRequest(PositionRequest request) {
             }
 
             if (mProcessRequestInProgress) {
-                if (getCallback()) {
+                // A request is already running and will answer this client
+                // too. Hand out the last fix meanwhile, but only if there is
+                // one: before the first fix the fields are all zero, and that
+                // went out as a successful position at 0, 0.
+                if (getCallback() && mPositionData.lastTimeStamp > 0) {
                     GeoLocation geoLocation(mPositionData.lastLatitude, mPositionData.lastLongitude, -1.0,
                        mPositionData.lastAccuracy, mPositionData.lastTimeStamp, -1.0, -1.0, -1.0, -1.0);
                     getCallback()->getLocationUpdateCb(geoLocation, ERROR_NONE, HANDLER_NETWORK);
@@ -444,11 +448,16 @@ void NetworkPositionProvider::handleResponse(HttpReqTask *task) {
         LS_LOG_DEBUG("latitude/longitude change: %f, %f", fabs(mPositionData.lastLatitude - latitude),
                     fabs(mPositionData.lastLongitude - longitude));
 
+        gettimeofday(&tval, (struct timezone *) NULL);
+        currentTime = tval.tv_sec * 1000LL + tval.tv_usec / 1000;
+
         if (latitude == mPositionData.lastLatitude &&
             longitude == mPositionData.lastLongitude &&
             accuracy == mPositionData.lastAccuracy) {
 
             LS_LOG_DEBUG("no position change in tracking");
+            // Confirmed just now, so the last fix is this recent.
+            mPositionData.lastTimeStamp = currentTime;
             return;
         }
 
@@ -458,8 +467,10 @@ void NetworkPositionProvider::handleResponse(HttpReqTask *task) {
         mPositionData.lastLatitude = latitude;
         mPositionData.lastLongitude = longitude;
         mPositionData.lastAccuracy = accuracy;
-        gettimeofday(&tval, (struct timezone *) NULL);
-        currentTime = tval.tv_sec * 1000LL + tval.tv_usec / 1000;
+        // Kept with the fix: replies built from the last fix otherwise carry
+        // timestamp 0, which the reply turns into "now", passing an old
+        // position off as a fresh one.
+        mPositionData.lastTimeStamp = currentTime;
 
         set_store_position(currentTime, latitude, longitude, INVALID_PARAM, INVALID_PARAM, INVALID_PARAM,
                            accuracy, INVALID_PARAM, (LOCATION_DB_PREF_PATH_NETWORK));
