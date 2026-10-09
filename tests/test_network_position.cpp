@@ -78,6 +78,10 @@ public:
         return provider.mPositionData.lastTimeStamp;
     }
 
+    static void setLastTimeStamp(NetworkPositionProvider& provider, int64_t timestamp) {
+        provider.mPositionData.lastTimeStamp = timestamp;
+    }
+
     // An HTTP 200 answer from the geolocation server with |body|, as the
     // request manager hands it over. handleResponse() frees the task.
     static void respond(NetworkPositionProvider& provider, const char *body) {
@@ -149,7 +153,9 @@ static void test_server_fix_keeps_its_time(void) {
     NetworkPositionProviderTest::startRequest(provider);
     provider.processRequest(positionRequest());
     g_assert_cmpint(callbacks.calls, ==, 2);
-    g_assert_cmpfloat(callbacks.last.getLatitude(), ==, 52.3731);
+    // Parsed from text, so not exact: under valgrind it differs from the
+    // literal in the last bit.
+    g_assert_cmpfloat_with_epsilon(callbacks.last.getLatitude(), 52.3731, 1e-9);
     g_assert_cmpfloat(callbacks.last.getTimeStamp(), ==, (double) stored);
 }
 
@@ -162,9 +168,10 @@ static void test_confirmed_fix_is_refreshed(void) {
     NetworkPositionProviderTest::respond(provider, kFix);
     g_assert_cmpint(callbacks.calls, ==, 1);
 
-    // As if the fix were an hour old.
+    // As if the fix were an hour old. Only the time changes: the position
+    // stays exactly as parsed.
     int64_t old = NetworkPositionProviderTest::lastTimeStamp(provider) - 3600000;
-    NetworkPositionProviderTest::setLastFix(provider, 52.3731, 4.8922, 30.0, old);
+    NetworkPositionProviderTest::setLastTimeStamp(provider, old);
 
     NetworkPositionProviderTest::respond(provider, kFix);
 
