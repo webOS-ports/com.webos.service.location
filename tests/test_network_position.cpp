@@ -74,6 +74,10 @@ public:
         provider.mPositionData.lastTimeStamp = timestamp;
     }
 
+    static void setFixBackend(NetworkPositionProvider& provider, NetworkLocationBackend backend) {
+        provider.mFixBackend = backend;
+    }
+
     static int64_t lastTimeStamp(const NetworkPositionProvider& provider) {
         return provider.mPositionData.lastTimeStamp;
     }
@@ -225,6 +229,22 @@ static void test_position_without_accuracy(void) {
     g_assert_cmpfloat(callbacks.last.getHorizontalAccuracy(), ==, 0.0);
 }
 
+// A fix from the other server (the choice changed since) is not handed to a
+// second client as if it were this one's. Without luna-prefs, as here, the
+// choice is beaconDB.
+static void test_fix_from_other_backend_not_reported(void) {
+    NetworkPositionProvider provider(NULL);
+    FakeCallbacks callbacks;
+    provider.setCallback(&callbacks);
+    NetworkPositionProviderTest::startRequest(provider);
+    NetworkPositionProviderTest::setLastFix(provider, 48.8584, 2.2945, 25.0, 1700000000123LL);
+    NetworkPositionProviderTest::setFixBackend(provider, NetworkLocationBackend::Google);
+
+    provider.processRequest(positionRequest());
+
+    g_assert_cmpint(callbacks.calls, ==, 0);
+}
+
 int main(int argc, char **argv) {
     g_test_init(&argc, &argv, NULL);
     // As LocationService::init() does: responses are handed back to the
@@ -237,6 +257,7 @@ int main(int argc, char **argv) {
     g_test_add_func("/network/not_found_is_no_fix", test_not_found_is_no_fix);
     g_test_add_func("/network/reply_without_position_is_no_fix", test_reply_without_position_is_no_fix);
     g_test_add_func("/network/position_without_accuracy", test_position_without_accuracy);
+    g_test_add_func("/network/fix_from_other_backend_not_reported", test_fix_from_other_backend_not_reported);
     int result = g_test_run();
     NetworkRequestManager::getInstance()->deInit();
     return result;

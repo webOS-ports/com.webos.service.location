@@ -19,6 +19,7 @@
 
 #include <glib.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -116,6 +117,48 @@ static void test_headers_name_the_client(void) {
     g_assert_cmpint(kGeolocateHeaderCount, ==, 4);
 }
 
+// The wsp.conf LuneOS ships (files/etc/wsp.conf): the key is the "apiKey"
+// field, base64, and decodes with a trailing newline.
+static const char kWspConf[] =
+        "{\n\t\"wpsName\": \"google\",\n"
+        "\t\"apiKey\": \"QUl6YVN5Qk9yaGJmbXYtMV9nMkJLMkFLXzNSNXEwcmlPLWU1Y19BCg==\",\n"
+        "\t\"services\": [ { \"features\": [\"geocode\", \"reverseGeocode\"],\n"
+        "\t\t\"url\": \"https://maps.googleapis.com/maps/api/geocode/json?\" } ]\n}\n";
+
+static void test_key_from_shipped_config(void) {
+    char *key = geolocationKeyFromConfig(kWspConf);
+    g_assert_nonnull(key);
+    g_assert_cmpstr(key, ==, "AIzaSyBOrhbfmv-1_g2BK2AK_3R5q0riO-e5c_A\n");
+    char url[256];
+    g_assert_true(buildGeolocateUrl(networkLocationBackendUrl(NetworkLocationBackend::Google), key,
+                                    url, sizeof(url)));
+    g_assert_cmpstr(url, ==, "https://www.googleapis.com/geolocation/v1/geolocate?key="
+                             "AIzaSyBOrhbfmv-1_g2BK2AK_3R5q0riO-e5c_A");
+    free(key);
+}
+
+// LG's older format: the file is the key and nothing else, in loc-utils'
+// base64 alphabet, which has "!@#$%" where the standard one has "RSTUV":
+// "key123" is a2V5MTIz in standard base64, a2%5M#Iz in LG's.
+static void test_key_from_plain_file(void) {
+    char *key = geolocationKeyFromConfig("a2%5M#Iz\n");
+    g_assert_nonnull(key);
+    g_assert_cmpstr(key, ==, "key123");
+    free(key);
+}
+
+static void test_no_key_in_config(void) {
+    g_assert_null(geolocationKeyFromConfig(NULL));
+    g_assert_null(geolocationKeyFromConfig(""));
+    g_assert_null(geolocationKeyFromConfig("{\"wpsName\": \"google\"}"));
+    g_assert_null(geolocationKeyFromConfig("{\"apiKey\": \"\"}"));
+    g_assert_null(geolocationKeyFromConfig("{\"apiKey\": 12}"));
+    // Past what loc-utils' decoder can hold.
+    g_assert_null(geolocationKeyFromConfig("{\"apiKey\": \"!!!\"}"));
+    std::string huge(4096, 'Q');
+    g_assert_null(geolocationKeyFromConfig(huge.c_str()));
+}
+
 int main(int argc, char **argv) {
     g_test_init(&argc, &argv, NULL);
     g_test_add_func("/backend/parse_names", test_parse_names);
@@ -126,5 +169,8 @@ int main(int argc, char **argv) {
     g_test_add_func("/backend/too_long_is_refused", test_too_long_is_refused);
     g_test_add_func("/backend/mock_address_taken_as_is", test_mock_address_taken_as_is);
     g_test_add_func("/backend/headers_name_the_client", test_headers_name_the_client);
+    g_test_add_func("/backend/key_from_shipped_config", test_key_from_shipped_config);
+    g_test_add_func("/backend/key_from_plain_file", test_key_from_plain_file);
+    g_test_add_func("/backend/no_key_in_config", test_no_key_in_config);
     return g_test_run();
 }

@@ -60,6 +60,17 @@ const char *networkLocationBackendUrl(NetworkLocationBackend backend);
 bool buildGeolocateUrl(const char *urlTemplate, const char *apiKey, char *out, size_t outSize);
 
 /*
+ * The Google key from the contents of /etc/location/wsp.conf: the "apiKey"
+ * field of its JSON, standard base64, as the geocoding code reads it. A file
+ * that is not JSON is taken as LG's older format, the key alone in loc-utils'
+ * own base64 alphabet. Decoding the whole JSON file with that alphabet, as
+ * this handler did, gave a string of garbage that curl refused as a URL. NULL when there is no key;
+ * otherwise malloc()ed, free() it. The decoded key may end in a newline;
+ * buildGeolocateUrl() trims it.
+ */
+char *geolocationKeyFromConfig(const char *content);
+
+/*
  * The request headers: what loc-utils sends by default (it uses these only
  * when given none) plus a User-Agent, which beaconDB asks clients to set to
  * identify themselves.

@@ -1092,6 +1092,7 @@ bool LocationService::setNetworkProvider(LSHandle *sh, LSMessage *message, void 
         return true;
     }
 
+    NetworkPositionProvider::setCurrentBackend(backend);
     LS_LOG_INFO("network provider is now %s", networkLocationBackendName(backend));
 
     jvalue_ref reply = networkProviderReply(backend);

@@ -46,11 +46,22 @@ NetworkPositionProvider::NetworkPositionProvider(LSHandle *sh) : PositionProvide
     mConnectivityStatus = false;
     misFirstCellResponse = true;
     mTimeoutId = 0;
+    mFixBackend = NetworkLocationBackend::BeaconDB;
 }
 
-/* The backend chosen with setNetworkProvider, beaconDB when none was. Read
- * for every request, so a change applies to the next one. */
+/*
+ * The backend chosen with setNetworkProvider, beaconDB when none was. Read
+ * from luna-prefs once and kept: luna-prefs leaks an allocation (1.4 kB,
+ * inside SQLite) on every read of a key that is not set, and this is asked
+ * for every request. setNetworkProvider() keeps it current.
+ */
+static bool sBackendLoaded = false;
+static NetworkLocationBackend sBackend = NetworkLocationBackend::BeaconDB;
+
 NetworkLocationBackend NetworkPositionProvider::currentBackend() {
+    if (sBackendLoaded)
+        return sBackend;
+
     LPAppHandle lpHandle = 0;
     char *name = NULL;
 
@@ -60,24 +71,31 @@ NetworkLocationBackend NetworkPositionProvider::currentBackend() {
         LPAppFreeHandle(lpHandle, false);
     }
 
-    NetworkLocationBackend backend = parseNetworkLocationBackend(name);
+    sBackend = parseNetworkLocationBackend(name);
+    sBackendLoaded = true;
     g_free(name);
-    return backend;
+    return sBackend;
+}
+
+void NetworkPositionProvider::setCurrentBackend(NetworkLocationBackend backend) {
+    sBackend = backend;
+    sBackendLoaded = true;
 }
 
 char *NetworkPositionProvider::readApiKey() {
-    unsigned char *geoLocAPIKey = NULL;
-    int retGeoLocAPIKey = LOC_SECURITY_ERROR_FAILURE;
+    gchar *content = NULL;
 
-    retGeoLocAPIKey = locSecurityBase64Decode(GEOLOCKEY_CONFIG_PATH,
-                                              &geoLocAPIKey);
-    if (LOC_SECURITY_ERROR_SUCCESS == retGeoLocAPIKey) {
-        return (char *) geoLocAPIKey;
-    }
-    else {
-        LS_LOG_ERROR("readApiKey failed");
+    if (!g_file_get_contents(GEOLOCKEY_CONFIG_PATH, &content, NULL, NULL)) {
+        LS_LOG_ERROR("readApiKey: cannot read %s", GEOLOCKEY_CONFIG_PATH);
         return NULL;
     }
+
+    char *key = geolocationKeyFromConfig(content);
+    g_free(content);
+
+    if (!key)
+        LS_LOG_ERROR("readApiKey: no apiKey in %s", GEOLOCKEY_CONFIG_PATH);
+    return key;
 }
 
 void NetworkPositionProvider::enable() {
@@ -257,7 +275,8 @@ ErrorCodes  NetworkPositionProvider::processRequest(PositionRequest request) {
                 // too. Hand out the last fix meanwhile, but only if there is
                 // one: before the first fix the fields are all zero, and that
                 // went out as a successful position at 0, 0.
-                if (getCallback() && mPositionData.lastTimeStamp > 0) {
+                // Nor from the other server, after setNetworkProvider.
+                if (getCallback() && mPositionData.lastTimeStamp > 0 && mFixBackend == currentBackend()) {
                     GeoLocation geoLocation(mPositionData.lastLatitude, mPositionData.lastLongitude, -1.0,
                        mPositionData.lastAccuracy, mPositionData.lastTimeStamp, -1.0, -1.0, -1.0, -1.0);
                     getCallback()->getLocationUpdateCb(geoLocation, ERROR_NONE, HANDLER_NETWORK);
@@ -475,6 +494,7 @@ void NetworkPositionProvider::handleResponse(HttpReqTask *task) {
         mPositionData.lastLatitude = latitude;
         mPositionData.lastLongitude = longitude;
         mPositionData.lastAccuracy = accuracy;
+        mFixBackend = currentBackend();
         // Kept with the fix: replies built from the last fix otherwise carry
         // timestamp 0, which the reply turns into "now", passing an old
         // position off as a fresh one.
