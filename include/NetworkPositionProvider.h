@@ -33,6 +33,7 @@
 #include <NetworkRequestManager.h>
 #include <PositionProviderInterface.h>
 #include <IConnectivityListener.h>
+#include <NetworkLocationBackend.h>
 
 class NetworkDataClient;
 
@@ -128,6 +129,9 @@ public:
     void Handle_WifiInternetNotification(bool status);
 
     void Handle_KernelResumeNotification();
+
+    // The server chosen with setNetworkProvider (luna-prefs), beaconDB by default.
+    static NetworkLocationBackend currentBackend();
 
 private:
 

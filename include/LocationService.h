@@ -555,6 +555,8 @@ private:
     LOCATION_SERVICE_METHOD(getGpsStatus);
     LOCATION_SERVICE_METHOD(setState);
     LOCATION_SERVICE_METHOD(getState);
+    LOCATION_SERVICE_METHOD(getNetworkProvider);
+    LOCATION_SERVICE_METHOD(setNetworkProvider);
     LOCATION_SERVICE_METHOD(sendExtraCommand);
     LOCATION_SERVICE_METHOD(setGPSParameters);
     LOCATION_SERVICE_METHOD(stopGPS);

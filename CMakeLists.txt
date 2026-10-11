@@ -190,10 +190,17 @@ if(LOCATION_BUILD_TESTS)
     target_link_libraries(test_sleepd_signals ${GLIB2_LDFLAGS} ${LIBPBNJSON_LDFLAGS})
     add_test(NAME sleepd_signals COMMAND test_sleepd_signals)
 
+    add_executable(test_network_backend
+        tests/test_network_backend.cpp
+        src/handler/position/network/NetworkLocationBackend.cpp)
+    target_link_libraries(test_network_backend ${GLIB2_LDFLAGS})
+    add_test(NAME network_backend COMMAND test_network_backend)
+
     add_executable(test_network_position
         tests/test_network_position.cpp
         tests/test_support.cpp
         src/handler/position/network/NetworkPositionProvider.cpp
+        src/handler/position/network/NetworkLocationBackend.cpp
         src/handler/position/network/NetworkData.cpp
         src/utils/NetworkRequestManager.cpp
         src/utils/GeoLocation.cpp

@@ -16,11 +16,12 @@
 
 
 #include <loc-utils/loc_security.h>
+#include <lunaprefs.h>
 #include "NetworkPositionProvider.h"
+#include "NetworkLocationBackend.h"
 #include "Gps_stored_data.h"
 #include "MockLocation.h"
 
-#define NETWORK_URL network_location_provider_url("https://www.googleapis.com/geolocation/v1/geolocate?key=%s")
 #define SIGNAL_CHANGE_THRESHOLD                20
 #define SCHEMA_ANY                             "{}"
 #define URL_LENGTH                             256
@@ -45,6 +46,23 @@ NetworkPositionProvider::NetworkPositionProvider(LSHandle *sh) : PositionProvide
     mConnectivityStatus = false;
     misFirstCellResponse = true;
     mTimeoutId = 0;
+}
+
+/* The backend chosen with setNetworkProvider, beaconDB when none was. Read
+ * for every request, so a change applies to the next one. */
+NetworkLocationBackend NetworkPositionProvider::currentBackend() {
+    LPAppHandle lpHandle = 0;
+    char *name = NULL;
+
+    if (LPAppGetHandle(NETWORK_BACKEND_PREF_APP, &lpHandle) == LP_ERR_NONE) {
+        if (LPAppCopyValueString(lpHandle, NETWORK_BACKEND_PREF, &name) != LP_ERR_NONE)
+            name = NULL;
+        LPAppFreeHandle(lpHandle, false);
+    }
+
+    NetworkLocationBackend backend = parseNetworkLocationBackend(name);
+    g_free(name);
+    return backend;
 }
 
 char *NetworkPositionProvider::readApiKey() {
@@ -247,7 +265,9 @@ ErrorCodes  NetworkPositionProvider::processRequest(PositionRequest request) {
                 break;
             }
 
-            if (NULL == mPositionData.nwGeolocationKey) {
+            // Only Google needs a key; beaconDB takes the request as it is.
+            if (currentBackend() == NetworkLocationBackend::Google &&
+                NULL == mPositionData.nwGeolocationKey) {
                 LS_LOG_INFO("geolocation API key is invalid, re-trying to read ...");
                 /*Read again*/
                 mPositionData.nwGeolocationKey = readApiKey();
@@ -370,37 +390,25 @@ char *NetworkPositionProvider::createWifiQuery() {
 
 bool NetworkPositionProvider::networkPostQuery(char *postData, const char *APIKey, gboolean sync) {
     char url[URL_LENGTH] = {0};
-    int written;
+    NetworkLocationBackend backend = currentBackend();
 
     /*
-     * The key is read from /etc/location/wsp.conf and may be absent (NULL) or
-     * arbitrarily long; sprintf'ing it into a 256-byte buffer trusted both.
+     * network_location_provider_url() hands back the mock server's address
+     * instead while a network mock location is enabled. The key is read from
+     * /etc/location/wsp.conf and may be absent; beaconDB needs none.
      */
-    if (APIKey == NULL) {
-        LS_LOG_ERROR("networkPostQuery: no geolocation API key configured");
+    const char *urlTemplate = network_location_provider_url(networkLocationBackendUrl(backend));
+
+    if (!buildGeolocateUrl(urlTemplate, APIKey, url, sizeof(url))) {
+        LS_LOG_ERROR("networkPostQuery: no usable geolocation URL for %s (missing or malformed API key?)",
+                     networkLocationBackendName(backend));
         return false;
     }
 
-    /*
-     * NETWORK_URL passes through network_location_provider_url() so the mock
-     * provider can swap in its localhost endpoint at runtime; the format
-     * cannot be a literal here, hence the targeted suppression.  Both
-     * candidate strings contain exactly one %s.
-     */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-nonliteral"
-    written = snprintf(url, sizeof(url), NETWORK_URL, APIKey);
-#pragma GCC diagnostic pop
+    LS_LOG_DEBUG("networkPostQuery %s via %s", url, networkLocationBackendName(backend));
 
-    if (written < 0 || (size_t) written >= sizeof(url)) {
-        LS_LOG_ERROR("networkPostQuery: geolocation URL exceeds %d bytes", URL_LENGTH);
-        return false;
-    }
-
-    LS_LOG_DEBUG("networkPostQuery %s", url);
-
-    int errorCode = NetworkRequestManager::getInstance()->initiateTransaction(NULL, 0, url, sync, NULL, this,
-                                                                              postData);
+    int errorCode = NetworkRequestManager::getInstance()->initiateTransaction(
+            const_cast<const char **>(kGeolocateHeaders), kGeolocateHeaderCount, url, sync, NULL, this, postData);
 
     if (ERROR_NONE == errorCode) {
         return true;
@@ -529,11 +537,19 @@ int NetworkPositionProvider::parseHTTPResponse(char *body, double *latitude, dou
         goto EXIT;
     }
 
-    jnumber_get_f64(jobject_get(parsedObj, J_CSTR_TO_BUF("accuracy")), accuracy);
-
+    /*
+     * A reply without a position is no position. The fields were read
+     * unchecked into variables the caller zeroes, so a body without
+     * "location" came out as a successful fix at 0, 0.
+     */
     locObj = jobject_get(parsedObj, J_CSTR_TO_BUF("location"));
-    jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lat")), latitude);
-    jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lng")), longitude);
+    if (jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lat")), latitude) != CONV_OK ||
+        jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lng")), longitude) != CONV_OK) {
+        LS_LOG_ERROR("geolocation reply without a position");
+        goto EXIT;
+    }
+    if (jnumber_get_f64(jobject_get(parsedObj, J_CSTR_TO_BUF("accuracy")), accuracy) != CONV_OK)
+        *accuracy = 0;
     error = ERROR_NONE;
 
     LS_LOG_DEBUG("parsed accuracy=%f, latitude=%f, longitude=%f", *accuracy, *latitude, *longitude);

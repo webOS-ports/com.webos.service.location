@@ -1,6 +1,7 @@
 {
   "location.operation": [
     "com.webos.service.location/setState",
+    "com.webos.service.location/setNetworkProvider",
     "com.webos.service.location/mock/enable",
     "com.webos.service.location/mock/disable",
     "com.webos.service.location/mock/setLocation"
@@ -23,6 +24,7 @@
     "com.webos.service.location/getTimeToFirstFix",
     "com.webos.service.location/getGpsDebugData",
     "com.webos.service.location/getNfwNotifications",
-    "com.webos.service.location/getState"
+    "com.webos.service.location/getState",
+    "com.webos.service.location/getNetworkProvider"
   ]
 }

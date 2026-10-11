@@ -84,10 +84,10 @@ public:
 
     // An HTTP 200 answer from the geolocation server with |body|, as the
     // request manager hands it over. handleResponse() frees the task.
-    static void respond(NetworkPositionProvider& provider, const char *body) {
+    static void respond(NetworkPositionProvider& provider, const char *body, long status = 200) {
         HttpReqTask *task = loc_create_http_task(NULL, 0, NULL, &provider);
         g_assert_nonnull(task);
-        task->curlDesc.httpResponseCode = 200;
+        task->curlDesc.httpResponseCode = status;
         task->responseData = g_strdup(body);
         task->responseSize = strlen(body);
         provider.handleResponse(task);
@@ -179,6 +179,52 @@ static void test_confirmed_fix_is_refreshed(void) {
     g_assert_cmpint(NetworkPositionProviderTest::lastTimeStamp(provider), >, old);
 }
 
+// beaconDB (and the Ichnaea API it follows) answers 404 with an error body
+// when it cannot place the access points: an error, and no fix kept.
+static const char kNotFound[] =
+        "{\"error\":{\"errors\":[{\"domain\":\"geolocation\",\"reason\":\"notFound\","
+        "\"message\":\"Not found\"}],\"code\":404,\"message\":\"Not found\"}}";
+
+static void test_not_found_is_no_fix(void) {
+    NetworkPositionProvider provider(NULL);
+    FakeCallbacks callbacks;
+    provider.setCallback(&callbacks);
+
+    NetworkPositionProviderTest::respond(provider, kNotFound, 404);
+
+    g_assert_cmpint(callbacks.calls, ==, 1);
+    g_assert_cmpint(callbacks.lastError, !=, ERROR_NONE);
+    g_assert_cmpint(NetworkPositionProviderTest::lastTimeStamp(provider), ==, 0);
+}
+
+// A 200 whose body has no position is no fix either; it used to come out as a
+// successful one at 0, 0.
+static void test_reply_without_position_is_no_fix(void) {
+    NetworkPositionProvider provider(NULL);
+    FakeCallbacks callbacks;
+    provider.setCallback(&callbacks);
+
+    NetworkPositionProviderTest::respond(provider, "{\"accuracy\":30.0}");
+    NetworkPositionProviderTest::respond(provider, "{\"location\":{\"lat\":52.1},\"accuracy\":30.0}");
+
+    g_assert_cmpint(callbacks.calls, ==, 0);
+    g_assert_cmpint(NetworkPositionProviderTest::lastTimeStamp(provider), ==, 0);
+}
+
+// No accuracy in the reply is still a position, with accuracy 0.
+static void test_position_without_accuracy(void) {
+    NetworkPositionProvider provider(NULL);
+    FakeCallbacks callbacks;
+    provider.setCallback(&callbacks);
+
+    NetworkPositionProviderTest::respond(provider, "{\"location\":{\"lat\":52.5,\"lng\":4.5}}");
+
+    g_assert_cmpint(callbacks.calls, ==, 1);
+    g_assert_cmpint(callbacks.lastError, ==, ERROR_NONE);
+    g_assert_cmpfloat_with_epsilon(callbacks.last.getLatitude(), 52.5, 1e-9);
+    g_assert_cmpfloat(callbacks.last.getHorizontalAccuracy(), ==, 0.0);
+}
+
 int main(int argc, char **argv) {
     g_test_init(&argc, &argv, NULL);
     // As LocationService::init() does: responses are handed back to the
@@ -188,6 +234,9 @@ int main(int argc, char **argv) {
     g_test_add_func("/network/last_fix_reported_with_its_time", test_last_fix_reported_with_its_time);
     g_test_add_func("/network/server_fix_keeps_its_time", test_server_fix_keeps_its_time);
     g_test_add_func("/network/confirmed_fix_is_refreshed", test_confirmed_fix_is_refreshed);
+    g_test_add_func("/network/not_found_is_no_fix", test_not_found_is_no_fix);
+    g_test_add_func("/network/reply_without_position_is_no_fix", test_reply_without_position_is_no_fix);
+    g_test_add_func("/network/position_without_accuracy", test_position_without_accuracy);
     int result = g_test_run();
     NetworkRequestManager::getInstance()->deInit();
     return result;

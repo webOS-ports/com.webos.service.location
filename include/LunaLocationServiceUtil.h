@@ -210,6 +210,19 @@
         REQUIRED_2(Handler, state))
 
 /*
+ * JSON SCHEMA: getNetworkProvider ([bool subscribe])
+ */
+#define JSCHEMA_GET_NETWORK_PROVIDER                        STRICT_SCHEMA(\
+        PROPS_1(PROP(subscribe, boolean)))
+
+/*
+ * JSON SCHEMA: setNetworkProvider (string provider)
+ */
+#define JSCHEMA_SET_NETWORK_PROVIDER                        STRICT_SCHEMA(\
+        PROPS_1(ENUM_PROP(provider, string, "beacondb", "google")) \
+        REQUIRED_1(provider))
+
+/*
  * JSON SCHEMA: stopGPS ()
  */
 #define JSCHEMA_STOP_GPS                                    SCHEMA_ANY
