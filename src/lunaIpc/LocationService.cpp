@@ -22,6 +22,7 @@
 #include <JsonUtility.h>
 #include <LunaLocationServiceUtil.h>
 #include <lunaprefs.h>
+#include "NetworkLocationBackend.h"
 #include <random>
 
 using namespace std;
@@ -45,6 +46,8 @@ LSMethod LocationService::rootMethod[] = {
         {"getGpsStatus",              LocationService::_getGpsStatus},
         {"setState",                  LocationService::_setState},
         {"getState",                  LocationService::_getState},
+        {"getNetworkProvider",        LocationService::_getNetworkProvider, LUNA_METHOD_FLAGS_NONE},
+        {"setNetworkProvider",        LocationService::_setNetworkProvider, LUNA_METHOD_FLAGS_NONE},
         {"getLocationHandlerDetails", LocationService::_getLocationHandlerDetails},
         {"getGpsSatelliteData",       LocationService::_getGpsSatelliteData},
         {"getTimeToFirstFix",         LocationService::_getTimeToFirstFix},
@@ -996,6 +999,112 @@ bool LocationService::getState(LSHandle *sh, LSMessage *message, void *data) {
 
     g_free(handler);
 
+    return true;
+}
+
+#define SUBSC_GET_NETWORK_PROVIDER "getNetworkProvider"
+
+/* {"returnValue":true,"provider":...,"providers":["beacondb","google"]} */
+static jvalue_ref networkProviderReply(NetworkLocationBackend backend) {
+    jvalue_ref reply = jobject_create();
+    if (jis_null(reply))
+        return reply;
+    location_util_form_json_reply(reply, true, LOCATION_SUCCESS);
+    jobject_put(reply, J_CSTR_TO_JVAL("provider"), jstring_create(networkLocationBackendName(backend)));
+    jvalue_ref providers = jarray_create(NULL);
+    jarray_append(providers, jstring_create(networkLocationBackendName(NetworkLocationBackend::BeaconDB)));
+    jarray_append(providers, jstring_create(networkLocationBackendName(NetworkLocationBackend::Google)));
+    jobject_put(reply, J_CSTR_TO_JVAL("providers"), providers);
+    return reply;
+}
+
+/*
+ * The server the network handler asks for a position: beaconDB, which needs
+ * no key and is used unless told otherwise, or Google (a key in
+ * /etc/location/wsp.conf). Subscribers hear about setNetworkProvider.
+ */
+bool LocationService::getNetworkProvider(LSHandle *sh, LSMessage *message, void * /*data*/) {
+    printMessageDetails("LUNA-API", message, sh);
+    LSError mLSError;
+    LSErrorInit(&mLSError);
+    jvalue_ref parsedObj = NULL;
+    bool isSubscription = false;
+
+    if (!LSMessageValidateSchemaReplyOnError(sh, message, JSCHEMA_GET_NETWORK_PROVIDER, &parsedObj)) {
+        LS_LOG_ERROR("Schema Error in getNetworkProvider");
+        return true;
+    }
+    j_release(&parsedObj);
+
+    if (isSubscribeTypeValid(sh, message, false, &isSubscription) && isSubscription) {
+        if (!LSSubscriptionAdd(sh, SUBSC_GET_NETWORK_PROVIDER, message, &mLSError)) {
+            LSErrorPrintAndFree(&mLSError);
+            LSMessageReplyError(sh, message, LOCATION_UNKNOWN_ERROR);
+            return true;
+        }
+    }
+
+    jvalue_ref reply = networkProviderReply(NetworkPositionProvider::currentBackend());
+    if (jis_null(reply)) {
+        LSMessageReplyError(sh, message, LOCATION_OUT_OF_MEM);
+        return true;
+    }
+    jobject_put(reply, J_CSTR_TO_JVAL("subscribed"), jboolean_create(isSubscription));
+    if (!LSMessageReply(sh, message, jvalue_tostring_simple(reply), &mLSError))
+        LSErrorPrintAndFree(&mLSError);
+    j_release(&reply);
+    return true;
+}
+
+bool LocationService::setNetworkProvider(LSHandle *sh, LSMessage *message, void * /*data*/) {
+    printMessageDetails("LUNA-API", message, sh);
+    LSError mLSError;
+    LSErrorInit(&mLSError);
+    jvalue_ref parsedObj = NULL;
+    jvalue_ref providerObj = NULL;
+    LPAppHandle lpHandle = 0;
+
+    if (!LSMessageValidateSchemaReplyOnError(sh, message, JSCHEMA_SET_NETWORK_PROVIDER, &parsedObj)) {
+        LS_LOG_ERROR("Schema Error in setNetworkProvider");
+        return true;
+    }
+
+    NetworkLocationBackend backend = NetworkLocationBackend::BeaconDB;
+    if (jobject_get_exists(parsedObj, J_CSTR_TO_BUF("provider"), &providerObj)) {
+        raw_buffer buf = jstring_get(providerObj);
+        gchar *name = g_strndup(buf.m_str, buf.m_len);
+        jstring_free_buffer(buf);
+        backend = parseNetworkLocationBackend(name);
+        g_free(name);
+    }
+    j_release(&parsedObj);
+
+    if (LPAppGetHandle(LOCATION_SERVICE_NAME, &lpHandle) != LP_ERR_NONE) {
+        LS_LOG_ERROR("LPAppGetHandle is not created");
+        LSMessageReplyError(sh, message, LOCATION_UNKNOWN_ERROR);
+        return true;
+    }
+    LPErr written = LPAppSetValueString(lpHandle, NETWORK_BACKEND_PREF, networkLocationBackendName(backend));
+    LPAppFreeHandle(lpHandle, true);
+    if (written != LP_ERR_NONE) {
+        LS_LOG_ERROR("Could not store the network provider");
+        LSMessageReplyError(sh, message, LOCATION_UNKNOWN_ERROR);
+        return true;
+    }
+
+    NetworkPositionProvider::setCurrentBackend(backend);
+    LS_LOG_INFO("network provider is now %s", networkLocationBackendName(backend));
+
+    jvalue_ref reply = networkProviderReply(backend);
+    if (jis_null(reply)) {
+        LSMessageReplyError(sh, message, LOCATION_OUT_OF_MEM);
+        return true;
+    }
+    if (!LSMessageReply(sh, message, jvalue_tostring_simple(reply), &mLSError))
+        LSErrorPrintAndFree(&mLSError);
+    if (!LSSubscriptionReply(mServiceHandle, SUBSC_GET_NETWORK_PROVIDER, jvalue_tostring_simple(reply), &mLSError))
+        LSErrorPrintAndFree(&mLSError);
+    j_release(&reply);
     return true;
 }
 

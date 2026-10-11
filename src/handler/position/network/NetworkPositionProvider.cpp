@@ -16,11 +16,12 @@
 
 
 #include <loc-utils/loc_security.h>
+#include <lunaprefs.h>
 #include "NetworkPositionProvider.h"
+#include "NetworkLocationBackend.h"
 #include "Gps_stored_data.h"
 #include "MockLocation.h"
 
-#define NETWORK_URL network_location_provider_url("https://www.googleapis.com/geolocation/v1/geolocate?key=%s")
 #define SIGNAL_CHANGE_THRESHOLD                20
 #define SCHEMA_ANY                             "{}"
 #define URL_LENGTH                             256
@@ -45,21 +46,56 @@ NetworkPositionProvider::NetworkPositionProvider(LSHandle *sh) : PositionProvide
     mConnectivityStatus = false;
     misFirstCellResponse = true;
     mTimeoutId = 0;
+    mFixBackend = NetworkLocationBackend::BeaconDB;
+}
+
+/*
+ * The backend chosen with setNetworkProvider, beaconDB when none was. Read
+ * from luna-prefs once and kept: luna-prefs leaks an allocation (1.4 kB,
+ * inside SQLite) on every read of a key that is not set, and this is asked
+ * for every request. setNetworkProvider() keeps it current.
+ */
+static bool sBackendLoaded = false;
+static NetworkLocationBackend sBackend = NetworkLocationBackend::BeaconDB;
+
+NetworkLocationBackend NetworkPositionProvider::currentBackend() {
+    if (sBackendLoaded)
+        return sBackend;
+
+    LPAppHandle lpHandle = 0;
+    char *name = NULL;
+
+    if (LPAppGetHandle(NETWORK_BACKEND_PREF_APP, &lpHandle) == LP_ERR_NONE) {
+        if (LPAppCopyValueString(lpHandle, NETWORK_BACKEND_PREF, &name) != LP_ERR_NONE)
+            name = NULL;
+        LPAppFreeHandle(lpHandle, false);
+    }
+
+    sBackend = parseNetworkLocationBackend(name);
+    sBackendLoaded = true;
+    g_free(name);
+    return sBackend;
+}
+
+void NetworkPositionProvider::setCurrentBackend(NetworkLocationBackend backend) {
+    sBackend = backend;
+    sBackendLoaded = true;
 }
 
 char *NetworkPositionProvider::readApiKey() {
-    unsigned char *geoLocAPIKey = NULL;
-    int retGeoLocAPIKey = LOC_SECURITY_ERROR_FAILURE;
+    gchar *content = NULL;
 
-    retGeoLocAPIKey = locSecurityBase64Decode(GEOLOCKEY_CONFIG_PATH,
-                                              &geoLocAPIKey);
-    if (LOC_SECURITY_ERROR_SUCCESS == retGeoLocAPIKey) {
-        return (char *) geoLocAPIKey;
-    }
-    else {
-        LS_LOG_ERROR("readApiKey failed");
+    if (!g_file_get_contents(GEOLOCKEY_CONFIG_PATH, &content, NULL, NULL)) {
+        LS_LOG_ERROR("readApiKey: cannot read %s", GEOLOCKEY_CONFIG_PATH);
         return NULL;
     }
+
+    char *key = geolocationKeyFromConfig(content);
+    g_free(content);
+
+    if (!key)
+        LS_LOG_ERROR("readApiKey: no apiKey in %s", GEOLOCKEY_CONFIG_PATH);
+    return key;
 }
 
 void NetworkPositionProvider::enable() {
@@ -239,7 +275,8 @@ ErrorCodes  NetworkPositionProvider::processRequest(PositionRequest request) {
                 // too. Hand out the last fix meanwhile, but only if there is
                 // one: before the first fix the fields are all zero, and that
                 // went out as a successful position at 0, 0.
-                if (getCallback() && mPositionData.lastTimeStamp > 0) {
+                // Nor from the other server, after setNetworkProvider.
+                if (getCallback() && mPositionData.lastTimeStamp > 0 && mFixBackend == currentBackend()) {
                     GeoLocation geoLocation(mPositionData.lastLatitude, mPositionData.lastLongitude, -1.0,
                        mPositionData.lastAccuracy, mPositionData.lastTimeStamp, -1.0, -1.0, -1.0, -1.0);
                     getCallback()->getLocationUpdateCb(geoLocation, ERROR_NONE, HANDLER_NETWORK);
@@ -247,7 +284,9 @@ ErrorCodes  NetworkPositionProvider::processRequest(PositionRequest request) {
                 break;
             }
 
-            if (NULL == mPositionData.nwGeolocationKey) {
+            // Only Google needs a key; beaconDB takes the request as it is.
+            if (currentBackend() == NetworkLocationBackend::Google &&
+                NULL == mPositionData.nwGeolocationKey) {
                 LS_LOG_INFO("geolocation API key is invalid, re-trying to read ...");
                 /*Read again*/
                 mPositionData.nwGeolocationKey = readApiKey();
@@ -370,37 +409,25 @@ char *NetworkPositionProvider::createWifiQuery() {
 
 bool NetworkPositionProvider::networkPostQuery(char *postData, const char *APIKey, gboolean sync) {
     char url[URL_LENGTH] = {0};
-    int written;
+    NetworkLocationBackend backend = currentBackend();
 
     /*
-     * The key is read from /etc/location/wsp.conf and may be absent (NULL) or
-     * arbitrarily long; sprintf'ing it into a 256-byte buffer trusted both.
+     * network_location_provider_url() hands back the mock server's address
+     * instead while a network mock location is enabled. The key is read from
+     * /etc/location/wsp.conf and may be absent; beaconDB needs none.
      */
-    if (APIKey == NULL) {
-        LS_LOG_ERROR("networkPostQuery: no geolocation API key configured");
+    const char *urlTemplate = network_location_provider_url(networkLocationBackendUrl(backend));
+
+    if (!buildGeolocateUrl(urlTemplate, APIKey, url, sizeof(url))) {
+        LS_LOG_ERROR("networkPostQuery: no usable geolocation URL for %s (missing or malformed API key?)",
+                     networkLocationBackendName(backend));
         return false;
     }
 
-    /*
-     * NETWORK_URL passes through network_location_provider_url() so the mock
-     * provider can swap in its localhost endpoint at runtime; the format
-     * cannot be a literal here, hence the targeted suppression.  Both
-     * candidate strings contain exactly one %s.
-     */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-nonliteral"
-    written = snprintf(url, sizeof(url), NETWORK_URL, APIKey);
-#pragma GCC diagnostic pop
+    LS_LOG_DEBUG("networkPostQuery %s via %s", url, networkLocationBackendName(backend));
 
-    if (written < 0 || (size_t) written >= sizeof(url)) {
-        LS_LOG_ERROR("networkPostQuery: geolocation URL exceeds %d bytes", URL_LENGTH);
-        return false;
-    }
-
-    LS_LOG_DEBUG("networkPostQuery %s", url);
-
-    int errorCode = NetworkRequestManager::getInstance()->initiateTransaction(NULL, 0, url, sync, NULL, this,
-                                                                              postData);
+    int errorCode = NetworkRequestManager::getInstance()->initiateTransaction(
+            const_cast<const char **>(kGeolocateHeaders), kGeolocateHeaderCount, url, sync, NULL, this, postData);
 
     if (ERROR_NONE == errorCode) {
         return true;
@@ -467,6 +494,7 @@ void NetworkPositionProvider::handleResponse(HttpReqTask *task) {
         mPositionData.lastLatitude = latitude;
         mPositionData.lastLongitude = longitude;
         mPositionData.lastAccuracy = accuracy;
+        mFixBackend = currentBackend();
         // Kept with the fix: replies built from the last fix otherwise carry
         // timestamp 0, which the reply turns into "now", passing an old
         // position off as a fresh one.
@@ -529,11 +557,19 @@ int NetworkPositionProvider::parseHTTPResponse(char *body, double *latitude, dou
         goto EXIT;
     }
 
-    jnumber_get_f64(jobject_get(parsedObj, J_CSTR_TO_BUF("accuracy")), accuracy);
-
+    /*
+     * A reply without a position is no position. The fields were read
+     * unchecked into variables the caller zeroes, so a body without
+     * "location" came out as a successful fix at 0, 0.
+     */
     locObj = jobject_get(parsedObj, J_CSTR_TO_BUF("location"));
-    jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lat")), latitude);
-    jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lng")), longitude);
+    if (jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lat")), latitude) != CONV_OK ||
+        jnumber_get_f64(jobject_get(locObj, J_CSTR_TO_BUF("lng")), longitude) != CONV_OK) {
+        LS_LOG_ERROR("geolocation reply without a position");
+        goto EXIT;
+    }
+    if (jnumber_get_f64(jobject_get(parsedObj, J_CSTR_TO_BUF("accuracy")), accuracy) != CONV_OK)
+        *accuracy = 0;
     error = ERROR_NONE;
 
     LS_LOG_DEBUG("parsed accuracy=%f, latitude=%f, longitude=%f", *accuracy, *latitude, *longitude);

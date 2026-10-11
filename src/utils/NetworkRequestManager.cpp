@@ -87,7 +87,9 @@ ErrorCodes NetworkRequestManager::initiateTransaction(const char **headers, int 
         return ERROR_MUTLITHREAD;
     }
 
-    HttpReqTask *gHttpReqTask = loc_create_http_task(headers, 0, message, userdata);
+    // size, not 0: given headers and a size of 0, loc-utils sent no headers
+    // at all, not even its defaults (which it uses only when headers is NULL).
+    HttpReqTask *gHttpReqTask = loc_create_http_task(headers, size, message, userdata);
 
     if (NULL == gHttpReqTask) {
         LS_LOG_ERROR("Fatal error...loc_create_http failed!!");

@@ -20,6 +20,7 @@
 #define NETWORKPROVIDER_H_
 
 #include <time.h>
+#include <cstdlib>
 #include <math.h>
 #include <functional>
 #include <map>
@@ -33,6 +34,7 @@
 #include <NetworkRequestManager.h>
 #include <PositionProviderInterface.h>
 #include <IConnectivityListener.h>
+#include <NetworkLocationBackend.h>
 
 class NetworkDataClient;
 
@@ -62,8 +64,10 @@ typedef struct NetworkPositionData {
     }
 
     ~NetworkPositionData() {
-        delete nwGeolocationKey;
-        delete cellInfo;
+        // malloc()ed by geolocationKeyFromConfig() and g_strdup()ed by
+        // onUpdateCellData(); delete on them was undefined behaviour.
+        free(const_cast<char *>(nwGeolocationKey));
+        g_free(cellInfo);
 
         if (lastAps)
             g_hash_table_destroy(lastAps);
@@ -129,6 +133,12 @@ public:
 
     void Handle_KernelResumeNotification();
 
+    // The server chosen with setNetworkProvider (luna-prefs), beaconDB by default.
+    static NetworkLocationBackend currentBackend();
+
+    // What setNetworkProvider just stored, so currentBackend() follows it.
+    static void setCurrentBackend(NetworkLocationBackend backend);
+
 private:
 
     static bool serviceStatusCb(LSHandle *sh, const char *serviceName, bool connected, void *ctx);
@@ -177,6 +187,10 @@ private:
     bool parseCellData(T& jsonObj);
 
 private:
+    // tests/test_network_position.cpp drives processRequest() and
+    // handleResponse() with the provider in states only a running service
+    // reaches.
+    friend class NetworkPositionProviderTest;
 
     NetworkData mNetworkData;
     _NetworkPositionData mPositionData;
@@ -191,6 +205,9 @@ private:
     bool mwifiStatus;
     bool mConnectivityStatus;
     bool misFirstCellResponse;
+    // The server the last fix came from: a fix from one is not handed out
+    // as the answer of the other after setNetworkProvider.
+    NetworkLocationBackend mFixBackend;
 };
 
 
