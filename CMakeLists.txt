@@ -190,6 +190,12 @@ if(LOCATION_BUILD_TESTS)
     target_link_libraries(test_sleepd_signals ${GLIB2_LDFLAGS} ${LIBPBNJSON_LDFLAGS})
     add_test(NAME sleepd_signals COMMAND test_sleepd_signals)
 
+    add_executable(test_connmgr_status
+        tests/test_connmgr_status.cpp
+        src/lunaIpc/ConnmgrStatus.cpp)
+    target_link_libraries(test_connmgr_status ${GLIB2_LDFLAGS} ${LIBPBNJSON_LDFLAGS})
+    add_test(NAME connmgr_status COMMAND test_connmgr_status)
+
     add_executable(test_network_backend
         tests/test_network_backend.cpp
         tests/test_support.cpp

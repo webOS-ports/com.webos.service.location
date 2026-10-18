@@ -47,6 +47,7 @@ public:
             int uncertainty);
     nyx_error_t injectExtraCommand(char* command);
     nyx_error_t updateNetworkAvailablity(NetworkInfo *networkInfo);
+    nyx_error_t updateNetworkState(bool connected, int type, bool roaming);
     nyx_error_t deleteAidingData();
     /*
      * Diagnostics straight from the GNSS engine. dest must be at least

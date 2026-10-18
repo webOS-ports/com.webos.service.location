@@ -109,6 +109,8 @@ private:
 
     void Notify_KernelResume();
 
+    void Notify_DataNetworkChange(bool connected, int type);
+
     std::set<IConnectivityListener *> m_listeners;
     void *m_telephony_cookie;
     void *m_wifi_cookie;

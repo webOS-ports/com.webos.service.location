@@ -242,6 +242,17 @@ public:
             double vertical_accuracy);
 
     void updateNetworkState(NetworkInfo *networkInfo);
+
+    /*
+     * Whether there is a data network, and of which ConnmgrNetworkType, for
+     * the GNSS HAL (IAGnssRil::updateNetworkState), as Android's
+     * GnssNetworkConnectivityHandler tells it. Qualcomm's xtra-daemon does
+     * not download XTRA until it has heard there is one, and the cellular
+     * "supl" context updateNetworkState() above follows is never up on a
+     * phone without mobile data. Sent when it changes, and once more when
+     * the engine has been opened, should the network have come first.
+     */
+    void updateDataNetwork(bool connected, int type);
     static gboolean gpsTimeoutCb(gpointer userdata);
     static void *gpsThreadProc(void *args);
 
@@ -341,6 +352,17 @@ public:
     XtraTime mXtraTime;
     XtraData mXtraData;
     NetworkInfo mNetworkInfo;
+
+    // updateDataNetwork(): what was last reported, and what the HAL has had
+    bool mNyxReady = false;
+    bool mDataNetworkKnown = false;
+    bool mDataNetworkConnected = false;
+    int mDataNetworkType = 0;
+    bool mDataNetworkSent = false;
+    bool mSentDataNetworkConnected = false;
+    int mSentDataNetworkType = 0;
+
+    void sendDataNetworkLocked();
 
     bool mCEPLogEnable = false;
     bool mNMEALogEnable = false;

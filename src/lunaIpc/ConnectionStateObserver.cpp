@@ -16,6 +16,7 @@
 
 
 #include "ConnectionStateObserver.h"
+#include "ConnmgrStatus.h"
 #include "SleepdSignals.h"
 #include <loc_log.h>
 #include <JsonUtility.h>
@@ -186,6 +187,14 @@ void ConnectionStateObserver::Notify_TelephonyStateChange(bool TeleState) {
     LS_LOG_DEBUG("Notify_TelephonyStateChange\n");
 }
 
+void ConnectionStateObserver::Notify_DataNetworkChange(bool connected, int type) {
+    std::for_each(m_listeners.begin(), m_listeners.end(),
+           [ & ] (IConnectivityListener *l )  {
+                    l->Handle_DataNetworkNotification(connected, type);
+                });
+    LS_LOG_DEBUG("Notify_DataNetworkChange %d type %d\n", connected, type);
+}
+
 void ConnectionStateObserver::Notify_KernelResume() {
     std::for_each(m_listeners.begin(), m_listeners.end(),
            [ & ] (IConnectivityListener *l )  {
@@ -351,6 +360,24 @@ bool ConnectionStateObserver::_connectivity_status_cb(LSHandle *sh, LSMessage *m
     jvalue_ref parsedObj = NULL;
     JSchemaInfo schemaInfo;
 
+    /*
+     * The GNSS HAL is told about the data network as well (see
+     * GPSPositionProvider::updateDataNetwork). Whenever this callback reports
+     * the internet state, it reports the network with it: as parsed from a
+     * real status, or as gone when the reply is not one.
+     */
+    bool dataConnected = false;
+    int dataType = CONNMGR_NETWORK_MOBILE;
+    if (!connmgrParseDataNetwork(LSMessageGetPayload(message), &dataConnected, &dataType)) {
+        dataConnected = false;
+        dataType = CONNMGR_NETWORK_MOBILE;
+    }
+
+    auto notify = [ & ] (bool internet) {
+        Notify_ConnectivityStateChange(internet);
+        Notify_DataNetworkChange(dataConnected && internet, dataType);
+    };
+
     jschema_ref input_schema = jschema_parse(j_cstr_to_buffer("{}"), DOMOPT_NOOPT, NULL);
     if (!input_schema)
         return false;
@@ -369,7 +396,7 @@ bool ConnectionStateObserver::_connectivity_status_cb(LSHandle *sh, LSMessage *m
     }
 
     if (found == false) {
-        Notify_ConnectivityStateChange(isInternetConnectionAvailable);
+        notify(isInternetConnectionAvailable);
         j_release(&parsedObj);
         return true;
     }
@@ -383,7 +410,7 @@ bool ConnectionStateObserver::_connectivity_status_cb(LSHandle *sh, LSMessage *m
         }
 
         if (found == false) {
-            Notify_ConnectivityStateChange(false);
+            notify(false);
             j_release(&parsedObj);
             return true;
         }
@@ -397,7 +424,7 @@ bool ConnectionStateObserver::_connectivity_status_cb(LSHandle *sh, LSMessage *m
 
         if (error == -1) {
             LS_LOG_DEBUG("WAN service is not running");
-            Notify_ConnectivityStateChange(false);
+            notify(false);
         }
 
         j_release(&parsedObj);
@@ -405,7 +432,7 @@ bool ConnectionStateObserver::_connectivity_status_cb(LSHandle *sh, LSMessage *m
     }
     LS_LOG_DEBUG("isInternetConnectionAvailable %d", isInternetConnectionAvailable);
 
-    Notify_ConnectivityStateChange(isInternetConnectionAvailable);
+    notify(isInternetConnectionAvailable);
 
     j_release(&parsedObj);
     return true;

@@ -33,6 +33,14 @@ public:
      * "resume" with resumetype kernel). Never called for refused or
      * abandoned suspend attempts. */
     virtual void Handle_KernelResumeNotification() = 0;
+
+    /* Whether there is a data network and which ConnmgrNetworkType carries
+     * it, each time connectionmanager reports its status. Only the GPS side
+     * needs the type, so the others need not override this. */
+    virtual void Handle_DataNetworkNotification(bool connected, int type) {
+        (void) connected;
+        (void) type;
+    }
 };
 
 #endif

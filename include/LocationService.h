@@ -426,6 +426,11 @@ public:
         updateWifiInternetState(Internet_state);
     }
 
+    void Handle_DataNetworkNotification(bool connected, int type) {
+        if (mGPSProvider)
+            mGPSProvider->updateDataNetwork(connected, type);
+    }
+
     void updateNwKey(const char *nwKey) {
         if (!nwKey)
             return;

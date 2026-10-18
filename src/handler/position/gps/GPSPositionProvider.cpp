@@ -16,6 +16,7 @@
 
 
 #include <GPSPositionProvider.h>
+#include <ConnmgrStatus.h>
 
 using namespace std;
 
@@ -584,6 +585,49 @@ void GPSPositionProvider::updateNetworkState(NetworkInfo *networkInfo) {
     pthread_mutex_unlock(&mGPSThreadMutex);
 }
 
+static_assert(CONNMGR_NETWORK_MOBILE == NYX_AGPS_RIL_NETWORK_TYPE_MOBILE &&
+              CONNMGR_NETWORK_WIFI == NYX_AGPS_RIL_NETWORK_TYPE_WIFI,
+              "ConnmgrNetworkType is passed to nyx as it is");
+
+void GPSPositionProvider::updateDataNetwork(bool connected, int type) {
+    pthread_mutex_lock(&mGPSThreadMutex);
+
+    mDataNetworkKnown = true;
+    mDataNetworkConnected = connected;
+    mDataNetworkType = type;
+    sendDataNetworkLocked();
+
+    pthread_mutex_unlock(&mGPSThreadMutex);
+}
+
+// With mGPSThreadMutex held.
+void GPSPositionProvider::sendDataNetworkLocked() {
+    if (!mNyxReady || !mDataNetworkKnown)
+        return;
+
+    // connectionmanager reports its status for many reasons; only a change
+    // is news to the HAL.
+    if (mDataNetworkSent && mSentDataNetworkConnected == mDataNetworkConnected &&
+        mSentDataNetworkType == mDataNetworkType)
+        return;
+
+    nyx_error_t rc = mGPSNyxInterface.updateNetworkState(mDataNetworkConnected,
+                                                         mDataNetworkType, false);
+
+    if (rc == NYX_ERROR_NONE || rc == NYX_ERROR_NOT_IMPLEMENTED) {
+        // A HAL without IAGnssRil will not have one next time either.
+        mDataNetworkSent = true;
+        mSentDataNetworkConnected = mDataNetworkConnected;
+        mSentDataNetworkType = mDataNetworkType;
+    }
+
+    if (rc == NYX_ERROR_NONE)
+        printf_info("data network for the GNSS HAL: %s, type %d\n",
+                    mDataNetworkConnected ? "connected" : "not connected", mDataNetworkType);
+    else if (rc != NYX_ERROR_NOT_IMPLEMENTED)
+        printf_warning("failed to tell the GNSS HAL about the data network: error = %d\n", rc);
+}
+
 bool GPSPositionProvider::hasCapability(unsigned int capability) {
     gboolean hasCapability = false;
 
@@ -670,6 +714,10 @@ void GPSPositionProvider::shutdown() {
 
     printf_debug("terminating gps-service...\n");
 
+    pthread_mutex_lock(&mGPSThreadMutex);
+    mNyxReady = false;
+    pthread_mutex_unlock(&mGPSThreadMutex);
+
     mGPSNyxInterface.deInitialize();
 
     pthread_mutex_lock(&mGPSThreadMutex);
@@ -716,6 +764,11 @@ bool GPSPositionProvider::init(LSHandle *sh) {
     if (NYX_ERROR_NONE != mGPSNyxInterface.initialize(this)) {
         return false;
     }
+
+    pthread_mutex_lock(&mGPSThreadMutex);
+    mNyxReady = true;
+    sendDataNetworkLocked();
+    pthread_mutex_unlock(&mGPSThreadMutex);
 
     setGpsParameters(mGPSConf.mLgeGPSPositionMode,
                      NYX_GPS_POSITION_RECURRENCE_PERIODIC,
