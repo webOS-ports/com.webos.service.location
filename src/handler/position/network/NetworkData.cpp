@@ -128,7 +128,7 @@ bool NetworkData::wifiAccessPointsCb(LSHandle *lshandle, LSMessage *msg) {
                     jnumber_get_i32(signalObj, &signalLevel);
                 }
 
-                LS_LOG_INFO("network handler:bssInfo %s and signalLevel %d gathered \n", bssId, signalLevel);
+                LS_LOG_INFO("network handler:bssInfo signalLevel %d gathered \n", signalLevel);
                 g_hash_table_insert(wifiAccesspoints, bssId, GINT_TO_POINTER(signalLevel));
             }
         }

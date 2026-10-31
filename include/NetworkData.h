@@ -69,6 +69,8 @@ private:
 
 private:
 
+    friend class NetworkDataTest;
+
     LSHandle *mPrvHandle;
     LSMessageToken mCellInfoReq;
     LSMessageToken mWifiInfoReq;

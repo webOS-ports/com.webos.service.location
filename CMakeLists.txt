@@ -212,6 +212,21 @@ if(LOCATION_BUILD_TESTS)
         src/mock/NetworkMockLocation.c)
     target_link_libraries(test_network_position ${LIBRARIES})
     add_test(NAME network_position COMMAND test_network_position)
+
+    add_executable(test_network_bssid_log
+        tests/test_network_bssid_log.cpp
+        tests/test_support.cpp
+        src/handler/position/network/NetworkPositionProvider.cpp
+        src/handler/position/network/NetworkLocationBackend.cpp
+        src/handler/position/network/NetworkData.cpp
+        src/utils/NetworkRequestManager.cpp
+        src/utils/GeoLocation.cpp
+        src/utils/Gps_stored_data.cpp
+        src/utils/db_util.cpp
+        src/mock/MockLocation.c
+        src/mock/NetworkMockLocation.c)
+    target_link_libraries(test_network_bssid_log ${LIBRARIES})
+    add_test(NAME network_bssid_log COMMAND test_network_bssid_log)
 endif()
 
 install(DIRECTORY include/
