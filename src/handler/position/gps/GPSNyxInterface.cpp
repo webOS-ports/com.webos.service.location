@@ -19,6 +19,7 @@
 #include <time.h>
 #include <GPSPositionProvider.h>
 #include <MockLocation.h>
+#include <XtraDownload.h>
 
 
 nyx_error_t GPSNyxInterface::initialize(void *instance) {
@@ -829,7 +830,6 @@ void GPSNyxInterface::xtraTimeCb(int64_t utcTime, int64_t timeReference,
 }
 
 gpointer GPSNyxInterface::xtraDataDownloadThread(gpointer arg) {
-    int nextserverindex = 0;
     int count = 0;
     char *xtraservers[3];
     const char *ACCEPT =
@@ -855,46 +855,21 @@ gpointer GPSNyxInterface::xtraDataDownloadThread(gpointer arg) {
 
     if (!providerInstance->mHttpReqTask) {
         providerInstance->mHttpReqTask = loc_http_task_create(headers, 2);
-        providerInstance->mHttpReqTask->responseData = nullptr;
+        if (providerInstance->mHttpReqTask)
+            providerInstance->mHttpReqTask->responseData = nullptr;
     }
 
-    while (!providerInstance->mHttpReqTask->responseData) {
+    if (fetchXtraData(&providerInstance->mHttpReqTask, xtraservers, count)) {
+        if (NYX_ERROR_NONE
+            != nyx_gps_inject_xtra_data(gpsNyxInterface->mNyxGpsSystem,
+                                        providerInstance->mHttpReqTask->responseData,
+                                        providerInstance->mHttpReqTask->responseSize))
+            printf_warning("failed to inject xtra data\n");
 
-        if (loc_http_task_prepare_connection(&providerInstance->mHttpReqTask,
-                                             xtraservers[nextserverindex])) {
-
-            if (loc_http_add_request(providerInstance->mHttpReqTask, true)) {
-
-                if (!providerInstance->mHttpReqTask->curlDesc.curlResultCode) {
-                    printf_debug("curl connection failed: %d\n",
-                                 providerInstance->mHttpReqTask->curlDesc.curlResultCode);
-                }
-
-                if (providerInstance->mHttpReqTask->curlDesc.httpResponseCode
-                    != HTTP_SUCESS_STATUS_CODE) {
-                    printf_info(
-                            "curl connection succeded: but http status code:%ld\n",
-                            providerInstance->mHttpReqTask->curlDesc.httpResponseCode);
-                }
-            }
-
-            // increment NextServerIndex and wrap around if necessary
-            nextserverindex++;
-
-            if (nextserverindex == count)
-                break; //tried all the servers breaking
-        }
-    }
-
-    if (NYX_ERROR_NONE
-        != nyx_gps_inject_xtra_data(gpsNyxInterface->mNyxGpsSystem,
-                                    providerInstance->mHttpReqTask->responseData,
-                                    providerInstance->mHttpReqTask->responseSize))
-        printf_warning("failed to inject xtra data\n");
-
-    if (providerInstance->mHttpReqTask->responseData) {
         g_free(providerInstance->mHttpReqTask->responseData);
         providerInstance->mHttpReqTask->responseData = nullptr;
+    } else {
+        printf_warning("no xtra server answered, nothing to inject\n");
     }
 
     providerInstance->mDownloadXtraDataStatus = IDLE;

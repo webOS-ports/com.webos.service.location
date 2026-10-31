@@ -188,6 +188,14 @@ if(LOCATION_BUILD_TESTS)
     target_link_libraries(test_gps_defaults ${GLIB2_LDFLAGS} ${PMLOGLIB_LDFLAGS} ${LOCUTILS_LDFLAGS})
     add_test(NAME gps_defaults COMMAND test_gps_defaults)
 
+    add_executable(test_xtra_download
+        tests/test_xtra_download.cpp
+        tests/test_support.cpp
+        src/handler/position/gps/XtraDownload.cpp)
+    target_link_libraries(test_xtra_download ${GLIB2_LDFLAGS} ${PMLOGLIB_LDFLAGS})
+    add_test(NAME xtra_download COMMAND test_xtra_download)
+    set_tests_properties(xtra_download PROPERTIES TIMEOUT 10)
+
     add_executable(test_ntp_packet tests/test_ntp_packet.cpp)
     target_link_libraries(test_ntp_packet ${GLIB2_LDFLAGS})
     add_test(NAME ntp_packet COMMAND test_ntp_packet)
