@@ -195,6 +195,7 @@ if(LOCATION_BUILD_TESTS)
         tests/test_support.cpp
         src/handler/position/network/NetworkLocationBackend.cpp)
     target_link_libraries(test_network_backend ${GLIB2_LDFLAGS} ${LIBPBNJSON_LDFLAGS} ${LOCUTILS_LDFLAGS} ${PMLOGLIB_LDFLAGS})
+    target_compile_definitions(test_network_backend PRIVATE LOCATION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME network_backend COMMAND test_network_backend)
 
     add_executable(test_network_position
