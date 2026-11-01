@@ -180,6 +180,14 @@ if(LOCATION_BUILD_TESTS)
     target_link_libraries(test_gps_cfg ${GLIB2_LDFLAGS} ${PMLOGLIB_LDFLAGS} ${LOCUTILS_LDFLAGS})
     add_test(NAME gps_cfg COMMAND test_gps_cfg)
 
+    add_executable(test_gps_defaults
+        tests/test_gps_defaults.cpp
+        tests/test_support.cpp
+        src/handler/position/gps/GPSServiceConfig.cpp
+        src/handler/position/gps/gps_cfg.cpp)
+    target_link_libraries(test_gps_defaults ${GLIB2_LDFLAGS} ${PMLOGLIB_LDFLAGS} ${LOCUTILS_LDFLAGS})
+    add_test(NAME gps_defaults COMMAND test_gps_defaults)
+
     add_executable(test_ntp_packet tests/test_ntp_packet.cpp)
     target_link_libraries(test_ntp_packet ${GLIB2_LDFLAGS})
     add_test(NAME ntp_packet COMMAND test_ntp_packet)

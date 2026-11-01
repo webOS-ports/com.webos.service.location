@@ -26,9 +26,12 @@ using namespace std;
 #define SUPL_VERSION    0x20000
 #define    SUPL_HOST        "supl.google.com"
 #define    SUPL_PORT        7276
-#define    XTRASERVER1        "http://xtra1.gpsonextra.net/xtra2.bin"
-#define    XTRASERVER2     "http://xtra2.gpsonextra.net/xtra2.bin"
-#define    XTRASERVER3     "http://xtra3.gpsonextra.net/xtra2.bin"
+// XTRA assistance data over HTTPS, so an on-path attacker cannot hand the
+// GPS chip forged orbit data. xtra2 and xtra3 answer over HTTPS; xtra1 did
+// not (connection timed out, 2026-10-29), so it is tried last.
+#define    XTRASERVER1        "https://xtra2.gpsonextra.net/xtra2.bin"
+#define    XTRASERVER2     "https://xtra3.gpsonextra.net/xtra2.bin"
+#define    XTRASERVER3     "https://xtra1.gpsonextra.net/xtra2.bin"
 #define    NTPSERVER1      "time.gpsonextra.net"
 #define    NTPSERVER2        "asia.pool.ntp.org"
 #define    NTPSERVER3        "0.kr.pool.ntp.org"
