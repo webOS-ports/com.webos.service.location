@@ -161,8 +161,7 @@ void NetworkPositionProvider::onUpdateWifiData(GHashTable *wifiAccessPoints) {
             updateKey = g_strdup((const gchar *) key);
             updateValue = GPOINTER_TO_INT(newValue);
             g_hash_table_insert(mPositionData.wifiAccessPointsList, updateKey, GINT_TO_POINTER(updateValue));
-            LS_LOG_DEBUG("###### onUpdateWifiData New key/value: %s, %d", (char *) updateKey,
-                        GPOINTER_TO_INT(updateValue));
+            LS_LOG_DEBUG("###### onUpdateWifiData New value: %d", GPOINTER_TO_INT(updateValue));
         }
 
     }
@@ -771,7 +770,7 @@ bool NetworkPositionProvider::parseWifiData(T& jsonObj) {
         g_hash_table_iter_init(&iter, mPositionData.wifiAccessPointsList);
 
         while (g_hash_table_iter_next(&iter, &key, &newValue)) {
-            LS_LOG_INFO("New key/value: %s, %d", (char *) key, GPOINTER_TO_INT(newValue));
+            LS_LOG_INFO("New value: %d", GPOINTER_TO_INT(newValue));
 
             if ((oldValue = g_hash_table_lookup(mPositionData.lastAps, (gconstpointer) key))) {
                 LS_LOG_INFO("Found key in existing table");
@@ -781,7 +780,7 @@ bool NetworkPositionProvider::parseWifiData(T& jsonObj) {
                 signalChange = abs(GPOINTER_TO_INT(newValue));
             }
 
-            LS_LOG_INFO("signal change of %s = %d", (char *) key, signalChange);
+            LS_LOG_INFO("signal change = %d", signalChange);
             signalChangeSum += signalChange;
         }
 
@@ -792,7 +791,7 @@ bool NetworkPositionProvider::parseWifiData(T& jsonObj) {
                 LS_LOG_INFO("Existing key is vanished in new table");
 
                 signalChange = abs(GPOINTER_TO_INT(oldValue));
-                LS_LOG_INFO("signal change of %s = %d", (char *) key, signalChange);
+                LS_LOG_INFO("signal change = %d", signalChange);
 
                 signalChangeSum += signalChange;
                 vanishedCount++;
@@ -819,7 +818,7 @@ bool NetworkPositionProvider::parseWifiData(T& jsonObj) {
             updateKey = g_strdup((const gchar *) key);
             updateValue = GPOINTER_TO_INT(newValue);
 
-            LS_LOG_INFO("inserting key/value: %s, %d", updateKey, updateValue);
+            LS_LOG_INFO("inserting value: %d", updateValue);
             g_hash_table_insert(mPositionData.lastAps, updateKey, GINT_TO_POINTER(updateValue));
 
             wifiAccessPointsListItem = jobject_create();
