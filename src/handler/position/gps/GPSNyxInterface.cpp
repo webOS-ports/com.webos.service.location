@@ -215,6 +215,12 @@ nyx_error_t GPSNyxInterface::updateNetworkAvailablity(
                                                networkInfo->available, networkInfo->apn.c_str());
 }
 
+nyx_error_t GPSNyxInterface::updateNetworkState(bool connected, int type,
+                                                bool roaming) {
+    return nyx_gps_update_network_state(mNyxGpsSystem, connected ? 1 : 0, type,
+                                        roaming ? 1 : 0, nullptr);
+}
+
 nyx_error_t GPSNyxInterface::getDebugData(char *dest, size_t destLen) {
     if (nullptr == mNyxGpsSystem || nullptr == dest || 0 == destLen)
         return NYX_ERROR_INVALID_VALUE;
